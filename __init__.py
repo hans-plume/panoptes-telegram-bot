@@ -1,30 +1,47 @@
-"""Plume Cloud API Client - OAuth 2.0 with async/await support."""
+"""
+Plume Cloud Telegram Bot Package
 
+A comprehensive Telegram bot for monitoring Plume Cloud network infrastructure
+with OAuth 2.0 authentication, real-time health monitoring, and intelligent
+service status reporting.
+
+Modules:
+    plume_api_client: OAuth and API integration with Plume Cloud
+    panoptes_bot: Telegram bot interface and command handlers
+
+Example:
+    To run the bot:
+    
+    $ export TELEGRAM_BOT_TOKEN="your-token"
+    $ python panoptes_bot.py
+
+Environment Variables:
+    TELEGRAM_BOT_TOKEN: Required. Your Telegram bot token from @BotFather
+    PLUME_API_BASE: Optional. Plume Cloud API base URL
+                    Default: https://api.plume.example.com
+
+Requires:
+    - python-telegram-bot (with all extras)
+    - httpx (for async HTTP requests)
+
+Author: Hans Velez
+License: MIT
+"""
+
+__version__ = "2.0.0"
+__author__ = "Hans Velez"
+
+# Export main components for easy importing
 from plume_api_client import (
     PlumeAPIError,
     get_oauth_token,
-    set_user_auth,
-    is_oauth_token_valid,
-    get_nodes_in_location,
-    get_connected_devices,
-    get_service_level,
-    get_qoe_stats,
-    get_wifi_connectivity,
     analyze_location_health,
+    PLUME_API_BASE,
 )
 
-PLUME_API_BASE = "https://api.plume.com/cloud/v1"
-
 __all__ = [
-    'PlumeAPIError',
-    'get_oauth_token',
-    'set_user_auth',
-    'is_oauth_token_valid',
-    'get_nodes_in_location',
-    'get_connected_devices',
-    'get_service_level',
-    'get_qoe_stats',
-    'get_wifi_connectivity',
-    'analyze_location_health',
-    'PLUME_API_BASE',
+    "PlumeAPIError",
+    "get_oauth_token",
+    "analyze_location_health",
+    "PLUME_API_BASE",
 ]
