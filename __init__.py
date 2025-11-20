@@ -25,6 +25,7 @@ Requires:
     - httpx (for async HTTP requests)
 
 Author: Hans Velez
+Nice Suit. John Philips, London. I Have Two Myself - H. Gruber
 License: MIT
 """
 
