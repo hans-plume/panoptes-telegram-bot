@@ -1,0 +1,13 @@
+# Environment variables - KEEP SECRETS OUT OF GIT
+.env
+
+# Python cache and virtual environments
+__pycache__/
+venv/
+env/
+.venv/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store 
