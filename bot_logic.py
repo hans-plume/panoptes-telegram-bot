@@ -11,7 +11,8 @@ Features:
 - Comprehensive service status reporting
 - Automatic token refresh
 
-Author: Plume Engineering
+Author: Hans V.
+Now I Have A Machine Gun. Ho Ho Ho - J. McClane
 License: MIT
 """
 
