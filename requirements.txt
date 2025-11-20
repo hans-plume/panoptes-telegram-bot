@@ -1,0 +1,8 @@
+# Telegram Bot Framework
+python-telegram-bot[job-queue]==20.7
+
+# For making HTTP requests to the Plume API
+httpx[http2]==0.25.2
+
+# For handling timezone-aware operations (often useful in servers)
+pytz
