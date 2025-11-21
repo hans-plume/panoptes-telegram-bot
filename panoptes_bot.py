@@ -1,7 +1,5 @@
 import os
 import logging
-fromimport os
-import logging
 from dotenv import load_dotenv
 from bot_logic import main as bot_main  # Import the main function from bot_logic
 
