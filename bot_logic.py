@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # These constants define the OAuth authentication flow states
 # Each state represents a step in the 4-step OAuth setup process
 (
-    ASK_AUTH_HEADER,       # State 1: Ask for Bearer token/authorization header
+    ASK_AUTH_HEADER,       # State 1: Ask for authorization header
     ASK_PARTNER_ID,        # State 2: Ask for Plume Partner ID
     ASK_PLUME_API_BASE,    # State 3: Ask for Plume API base URL (optional)
     CONFIRM_AUTH,          # State 4: Confirm and test OAuth connection
