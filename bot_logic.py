@@ -184,7 +184,12 @@ def format_location_health(location: dict, internet: dict) -> str:
         lines.append(f"Download: {down} Mbps | Upload: {up} Mbps")
     
     # Connected devices count for at-a-glance view
-    devices_count ="""
+    devices_count = location.get("connectedDevicesCount", 0)
+    lines.append(f"Connected Devices: {devices_count}")
+    
+    return "\n".join(lines)
+...
+"""
 Panoptes Telegram Bot - Plume Cloud Network Monitoring
 ========================================================
 
@@ -369,4 +374,8 @@ def format_location_health(location: dict, internet: dict) -> str:
         lines.append(f"Download: {down} Mbps | Upload: {up} Mbps")
     
     # Connected devices count for at-a-glance view
-    devices_count =
+    devices_count = location.get("connectedDevicesCount", 0)
+    lines.append(f"Connected Devices: {devices_count}")
+    
+    return "\n".join(lines)
+...
