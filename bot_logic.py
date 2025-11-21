@@ -64,7 +64,6 @@ logger = logging.getLogger(__name__)
 (
     ASK_AUTH_HEADER,       # State 1: Ask for authorization header
     ASK_PARTNER_ID,        # State 2: Ask for Plume Partner ID
-    ASK_PLUME_API_BASE,    # State 3: Ask for Plume API base URL (optional)
     CONFIRM_AUTH,          # State 4: Confirm and test OAuth connection
 ) = range(4)
 
@@ -281,7 +280,7 @@ async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await update.message.reply_text(
         "Starting OAuth setup...\n\n"
         "**Step 1 of 3:** Please provide your Plume authorization header.\n"
-        "This should look like `Bearer <your_long_token>`.\n\n"
+        "This should look like `Basic <your_long_token>`.\n\n"
         "Send /cancel at any time to abort."
     )
     return ASK_AUTH_HEADER
