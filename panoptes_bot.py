@@ -1,17 +1,33 @@
 import os
+import logging
+fromimport os
+import logging
 from dotenv import load_dotenv
+from bot_logic import main as bot_main  # Import the main function from bot_logic
 
-# Load environment variables from .env file before anything else
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# Now, import and run the main bot logic from your renamed file
-from bot_logic import main
+def main() -> None:
+    """
+    Load the environment variables and run the bot.
+    """
+    # Load environment variables from a .env file if it exists
+    load_dotenv()
 
-if __name__ == "__main__":
-    # Check if the token was loaded correctly
-    if not os.getenv("TELEGRAM_BOT_TOKEN"):
-        raise ValueError(
-            "TELEGRAM_BOT_TOKEN not found. "
-            "Ensure it's in your .env file or set as a system environment variable."
-        )
+    # Get the Telegram bot token from the environment variable
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+
+    if not token:
+        logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
+        return
+
+    # Run the bot's main logic, passing the token
+    bot_main(token)
+
+if __name__ == '__main__':
     main()
