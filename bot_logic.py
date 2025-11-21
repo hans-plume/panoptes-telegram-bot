@@ -259,7 +259,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     If not configured, prompts the user to start the setup.
     """
     user = update.effective_user
-    if not is_oauth_token_valid():
+    if not is_oauth_token_valid(user.id):
         await update.message.reply_text(
             f"Hi {user.first_name}! Welcome to Panoptes Bot.\n"
             "Your Plume API access is not configured. "
@@ -327,13 +327,14 @@ async def confirm_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     auth_header = context.user_data.get('auth_header')
     partner_id = context.user_data.get('partner_id')
+    user_id = update.effective_user.id
 
-    set_user_auth(auth_header, partner_id, api_base)
+    set_user_auth(user_id, auth_header, partner_id, api_base)
 
     await update.message.reply_text("Testing API connection...")
     
     try:
-        if is_oauth_token_valid():
+        if is_oauth_token_valid(user_id):
             await update.message.reply_text(
                 "✅ **Success!** API connection is working.\n"
                 "You can now use commands like /status."
@@ -369,7 +370,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     - WiFi networks
     - Service level (QoE)
     """
-    if not is_oauth_token_valid():
+    user = update.effective_user
+    if not is_oauth_token_valid(user.id):
         await update.message.reply_text("API access is not configured. Please run /setup.")
         return
 
@@ -377,12 +379,12 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     try:
         # Fetch all data points in parallel
-        location_data = get_location_status()
-        internet_data = get_internet_health()
-        nodes_data = get_nodes_in_location()
-        devices_data = get_connected_devices()
-        wifi_data = get_wifi_networks()
-        service_level_data = get_service_level()
+        location_data = get_location_status(user.id)
+        internet_data = get_internet_health(user.id)
+        nodes_data = get_nodes_in_location(user.id)
+        devices_data = get_connected_devices(user.id)
+        wifi_data = get_wifi_networks(user.id)
+        service_level_data = get_service_level(user.id)
 
         # Format and send each piece of information as a separate message
         await update.message.reply_markdown(format_location_health(location_data, internet_data))
