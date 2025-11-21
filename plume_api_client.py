@@ -6,7 +6,7 @@ It handles token management, automatic token refresh, and all API endpoint inter
 
 Usage:
     # Initialize and authenticate
-    client = PlumeAPIClient(plume_api_base="https://api.plume.com")
+    client = PlumeAPIClient(plume_api_base="https://piranha-gamma.prod.us-west-2.aws.plumenet.io/api/")
     token_data = await client.get_oauth_token(sso_url, auth_header, partner_id)
     
     # Make API calls
@@ -192,6 +192,7 @@ async def plume_request(
             ) from e
 
     token = auth_config.get("access_token")
+    
     # --- End of Token Refresh Logic ---
     
     api_base = auth_config.get("plume_api_base", PLUME_API_BASE)
