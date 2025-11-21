@@ -6,3 +6,6 @@ httpx[http2]==0.25.2
 
 # For handling timezone-aware operations (often useful in servers)
 pytz
+
+# For loading environment variables from .env files
+python-dotenv
