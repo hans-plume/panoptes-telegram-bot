@@ -1,22 +1,8 @@
 """
-"""
-"""
-"""
-"""
-"""
 Plume Cloud API Client Module
 
 This module provides OAuth 2.0 authentication and API wrappers for the Plume Cloud platform.
 It handles token management, automatic token refresh, and all API endpoint interactions.
-
-Usage:
-    # Initialize and authenticate
-    client = PlumeAPIClient(plume_api_base="https://piranha-gamma.prod.us-west-2.aws.plumenet.io/api/")
-    token_data = await client.get_oauth_token(sso_url, auth_header, partner_id)
-    
-    # Make API calls
-    nodes = await client.get_nodes_in_location(user_id, customer_id, location_id)
-    health = await client.analyze_location_health(...)
 """
 
 import logging
