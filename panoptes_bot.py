@@ -5,6 +5,7 @@ Panoptes Telegram Bot - Plume Cloud Network Monitoring
 A production-ready Telegram bot for real-time monitoring of Plume Cloud networks.
 
 Author: Hans V.
+++ Nice Suit. John Philips, London. I Have Two Myself. -> H. Gruber ++
 License: MIT
 """
 
