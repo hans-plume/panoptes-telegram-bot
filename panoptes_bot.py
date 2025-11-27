@@ -74,7 +74,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         location_data = await get_location_status(user_id, customer_id, location_id)
         service_level_data = await get_service_level(user_id, customer_id, location_id)
-        nodes_data = await get_nodes_in_location(user_id, customer_id, location_id)
+        nodes_data = await get_nodes_in_location(user_id, location_id)
         devices_data = await get_connected_devices(user_id, customer_id, location_id)
         
         health_report = analyze_location_health(location_data, service_level_data, nodes_data, devices_data, {})
