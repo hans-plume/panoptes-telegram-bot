@@ -126,7 +126,7 @@ async def get_locations(user_id: int) -> list:
     return await plume_request(
         user_id=user_id,
         method="GET",
-        endpoint="customer/locations",
+        endpoint="partners/locations",
         params={"limit": 100} # Get up to 100 locations
     )
 
