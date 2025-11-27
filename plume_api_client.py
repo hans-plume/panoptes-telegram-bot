@@ -118,16 +118,28 @@ async def plume_request(user_id: int, method: str, endpoint: str, params: Option
         raise PlumeAPIError("Network error while contacting Plume Cloud.") from e
 
 # ============ BUSINESS LOGIC / PLUME API WRAPPERS ============
-async def get_locations(user_id: int) -> list:
+async def get_customers(user_id: int) -> list:
     """
-    Get all locations accessible by the partner.
-    Endpoint: GET /Customer/locations
+    Get all customers accessible by the partner.
+    Endpoint: GET /Customers
     """
     return await plume_request(
         user_id=user_id,
         method="GET",
-        endpoint="partners/locations",
-        params={"limit": 100} # Get up to 100 locations
+        endpoint="Customers",
+        params={"limit": 100} # Get up to 100 customers
+    )
+
+async def get_locations_for_customer(user_id: int, customer_id: str) -> list:
+    """
+    Get all locations for a specific customer.
+    Endpoint: GET /Customers/{customerId}/locations
+    """
+    return await plume_request(
+        user_id=user_id,
+        method="GET",
+        endpoint=f"Customers/{customer_id}/locations",
+        params={"limit": 100}
     )
 
 async def get_nodes_in_location(user_id: int, customer_id: str, location_id: str) -> list:
