@@ -142,6 +142,10 @@ async def get_service_level(user_id: int, customer_id: str, location_id: str) ->
 async def get_qoe_stats(user_id: int, customer_id: str, location_id: str) -> dict:
     """Get App QoE (Quality of Experience) metrics."""
     return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}/appqoe/AppQoeStatsByTrafficClass")
+    
+async def get_wifi_networks(user_id: int, customer_id: str, location_id: str) -> list:
+    """Get WiFi networks configured for a location."""
+    return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}/wifiNetworks")
 
 # ============ SERVICE HEALTH ANALYSIS ============
 
