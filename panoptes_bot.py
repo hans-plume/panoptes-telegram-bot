@@ -28,7 +28,8 @@ from plume_api_client import (
     set_user_auth,
     is_oauth_token_valid,
     get_oauth_token,
-    get_locations, # <-- IMPORT NEW FUNCTION
+    get_customers,
+    get_locations_for_customer,
     get_nodes_in_location,
     get_location_status,
     get_connected_devices,
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 # ============ CONVERSATION STATES ============
 (ASK_AUTH_HEADER, ASK_PARTNER_ID) = range(2)
-(SELECT_LOCATION,) = range(1) # For new /locations conversation
+(SELECT_CUSTOMER, SELECT_LOCATION) = range(2) # For new /locations conversation
 
 # ============ COMMAND HANDLERS ============
 
@@ -62,7 +63,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("API access is not configured. Please run /setup.")
         return
 
-    # Check if a location has been selected and stored
     if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
         await update.message.reply_text("You haven't selected a location yet. Please run /locations first.")
         return
@@ -97,32 +97,63 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ============ LOCATION SELECTION CONVERSATION ============
 
 async def locations_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Starts the location selection process."""
+    """Starts the customer selection process."""
     user_id = update.effective_user.id
     if not is_oauth_token_valid(user_id):
         await update.message.reply_text("API access is not configured. Please run /setup.")
         return ConversationHandler.END
 
-    await update.message.reply_text("Fetching your locations...")
+    await update.message.reply_text("Fetching your customers...")
     try:
-        locations = await get_locations(user_id)
+        customers = await get_customers(user_id)
+        if not customers:
+            await update.message.reply_text("Could not find any customers for your account.")
+            return ConversationHandler.END
+
+        keyboard = []
+        for cust in customers:
+            name = cust.get('name') or f"ID: {cust.get('id')}"
+            callback_data = cust.get('id')
+            button = InlineKeyboardButton(name, callback_data=callback_data)
+            keyboard.append([button])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text('Please choose a customer:', reply_markup=reply_markup)
+        return SELECT_CUSTOMER
+
+    except PlumeAPIError as e:
+        await update.message.reply_text(f"API Error: {e}")
+        return ConversationHandler.END
+
+async def customer_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles the user's customer choice and shows locations."""
+    query = update.callback_query
+    await query.answer()
+    
+    customer_id = query.data
+    context.user_data['customer_id'] = customer_id
+    user_id = update.effective_user.id
+
+    await query.edit_message_text(text=f"Customer `{customer_id}` selected. Fetching locations...")
+
+    try:
+        locations = await get_locations_for_customer(user_id, customer_id)
         if not locations:
-            await update.message.reply_text("Could not find any locations for your account.")
+            await query.edit_message_text(text="Could not find any locations for this customer.")
             return ConversationHandler.END
 
         keyboard = []
         for loc in locations:
-            # Callback data must be string. Format: "customer_id,location_id"
-            callback_data = f"{loc.get('customerId')},{loc.get('id')}"
+            callback_data = loc.get('id')
             button = InlineKeyboardButton(loc.get('name', 'Unnamed Location'), callback_data=callback_data)
             keyboard.append([button])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text('Please choose a location:', reply_markup=reply_markup)
+        await query.edit_message_text('Please choose a location:', reply_markup=reply_markup)
         return SELECT_LOCATION
 
     except PlumeAPIError as e:
-        await update.message.reply_text(f"API Error: {e}")
+        await query.edit_message_text(f"API Error: {e}")
         return ConversationHandler.END
 
 async def location_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -130,15 +161,10 @@ async def location_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await query.answer()
 
-    try:
-        customer_id, location_id = query.data.split(',')
-        context.user_data['customer_id'] = customer_id
-        context.user_data['location_id'] = location_id
+    location_id = query.data
+    context.user_data['location_id'] = location_id
 
-        await query.edit_message_text(text=f"Location selected: `{location_id}`\nRun /status to get a report.")
-    except (ValueError, IndexError):
-        await query.edit_message_text(text="Invalid selection. Please try /locations again.")
-
+    await query.edit_message_text(text=f"Location selected: `{location_id}`\nRun /status to get a report.")
     return ConversationHandler.END
 
 async def locations_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -196,7 +222,6 @@ def main() -> None:
 
     application = ApplicationBuilder().token(token).build()
 
-    # Handler for 2-step /setup
     setup_handler = ConversationHandler(
         entry_points=[CommandHandler("setup", setup_start)],
         states={
@@ -206,10 +231,10 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel_setup)],
     )
 
-    # Handler for /locations
     locations_handler = ConversationHandler(
         entry_points=[CommandHandler("locations", locations_start)],
         states={
+            SELECT_CUSTOMER: [CallbackQueryHandler(customer_selected)],
             SELECT_LOCATION: [CallbackQueryHandler(location_selected)],
         },
         fallbacks=[CommandHandler("cancel", locations_cancel)],
@@ -218,7 +243,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(setup_handler)
-    application.add_handler(locations_handler) # Add the new handler
+    application.add_handler(locations_handler)
 
     logger.info("Bot is starting...")
     application.run_polling()
