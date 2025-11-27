@@ -163,6 +163,21 @@ async def get_nodes_in_location(user_id: int, customer_id: str, location_id: str
         logger.error(f"An unexpected error occurred in get_nodes_in_location: {e}")
         return None
 
+    url = f"{BASE_URL}/Customers/{customer_id}/locations/{location_id}/nodes"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=auth_header)
+            response.raise_for_status()
+            data = response.json()
+            # The actual list of nodes is under the "nodes" key
+            return data.get("nodes", [])
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Plume API returned client error {e.response.status_code}: {e.response.text}")
+        return None
+    except Exception as e:
+        logger.error(f"An unexpected error occurred in get_nodes_in_location: {e}")
+        return None
+
 async def get_location_status(user_id: int, customer_id: str, location_id: str) -> dict:
     """Get location health and status information."""
     return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}")
