@@ -142,9 +142,10 @@ async def get_locations_for_customer(user_id: int, customer_id: str) -> list:
         params={"limit": 100}
     )
 
-async def get_nodes_in_location(user_id: int, customer_id: str, location_id: str) -> list:
-    """Get all nodes (gateways) in a specific location."""
-    return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}/nodes")
+async def get_nodes_in_location(user_id: int, location_id: str) -> list:
+    """Get all nodes in a specific location."""
+    response = await plume_request(user_id, "GET", f"Locations/{location_id}/nodes")
+    return response.get("nodes", []) # Extracts the list from the "nodes" key
 
 async def get_location_status(user_id: int, customer_id: str, location_id: str) -> dict:
     """Get location health and status information."""
