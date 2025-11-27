@@ -28,7 +28,6 @@ from plume_api_client import (
     set_user_auth,
     is_oauth_token_valid,
     get_oauth_token,
-    get_customers,
     get_locations_for_customer,
     get_nodes_in_location,
     get_location_status,
@@ -46,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # ============ CONVERSATION STATES ============
 (ASK_AUTH_HEADER, ASK_PARTNER_ID) = range(2)
-(SELECT_CUSTOMER, SELECT_LOCATION) = range(2) # For new /locations conversation
+(ASK_CUSTOMER_ID, SELECT_LOCATION) = range(2) # For new /locations conversation
 
 # ============ COMMAND HANDLERS ============
 
@@ -97,49 +96,27 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ============ LOCATION SELECTION CONVERSATION ============
 
 async def locations_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Starts the customer selection process."""
+    """Starts the location selection process by asking for a Customer ID."""
     user_id = update.effective_user.id
     if not is_oauth_token_valid(user_id):
         await update.message.reply_text("API access is not configured. Please run /setup.")
         return ConversationHandler.END
 
-    await update.message.reply_text("Fetching your customers...")
-    try:
-        customers = await get_customers(user_id)
-        if not customers:
-            await update.message.reply_text("Could not find any customers for your account.")
-            return ConversationHandler.END
+    await update.message.reply_text("Please provide the Customer ID you want to inspect.")
+    return ASK_CUSTOMER_ID
 
-        keyboard = []
-        for cust in customers:
-            name = cust.get('name') or f"ID: {cust.get('id')}"
-            callback_data = cust.get('id')
-            button = InlineKeyboardButton(name, callback_data=callback_data)
-            keyboard.append([button])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text('Please choose a customer:', reply_markup=reply_markup)
-        return SELECT_CUSTOMER
-
-    except PlumeAPIError as e:
-        await update.message.reply_text(f"API Error: {e}")
-        return ConversationHandler.END
-
-async def customer_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handles the user's customer choice and shows locations."""
-    query = update.callback_query
-    await query.answer()
-    
-    customer_id = query.data
+async def customer_id_provided(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles the provided Customer ID and fetches its locations."""
+    customer_id = update.message.text.strip()
     context.user_data['customer_id'] = customer_id
     user_id = update.effective_user.id
 
-    await query.edit_message_text(text=f"Customer `{customer_id}` selected. Fetching locations...")
+    await update.message.reply_text(f"Customer `{customer_id}` selected. Fetching locations...")
 
     try:
         locations = await get_locations_for_customer(user_id, customer_id)
         if not locations:
-            await query.edit_message_text(text="Could not find any locations for this customer.")
+            await update.message.reply_text("Could not find any locations for this customer. Please try /locations again with a different ID.")
             return ConversationHandler.END
 
         keyboard = []
@@ -149,11 +126,11 @@ async def customer_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             keyboard.append([button])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text('Please choose a location:', reply_markup=reply_markup)
+        await update.message.reply_text('Please choose a location:', reply_markup=reply_markup)
         return SELECT_LOCATION
 
     except PlumeAPIError as e:
-        await query.edit_message_text(f"API Error: {e}")
+        await update.message.reply_text(f"API Error: {e}\n\nPlease check the Customer ID and try again.")
         return ConversationHandler.END
 
 async def location_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -234,7 +211,7 @@ def main() -> None:
     locations_handler = ConversationHandler(
         entry_points=[CommandHandler("locations", locations_start)],
         states={
-            SELECT_CUSTOMER: [CallbackQueryHandler(customer_selected)],
+            ASK_CUSTOMER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_id_provided)],
             SELECT_LOCATION: [CallbackQueryHandler(location_selected)],
         },
         fallbacks=[CommandHandler("cancel", locations_cancel)],
