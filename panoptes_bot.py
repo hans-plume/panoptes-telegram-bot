@@ -31,8 +31,6 @@ from plume_api_client import (
     get_locations_for_customer,
     get_nodes_in_location,
     get_location_status,
-    get_connected_devices,
-    get_service_level,
     analyze_location_health,
     PlumeAPIError,
     PLUME_SSO_URL,
@@ -73,17 +71,15 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         location_id = context.user_data['location_id']
 
         location_data = await get_location_status(user_id, customer_id, location_id)
-        service_level_data = await get_service_level(user_id, customer_id, location_id)
         nodes_data = await get_nodes_in_location(user_id, customer_id, location_id)
-        devices_data = await get_connected_devices(user_id, customer_id, location_id)
         
-        health_report = analyze_location_health(location_data, service_level_data, nodes_data, devices_data, {})
+        health_report = analyze_location_health(location_data, nodes_data)
         
         summary = (
             f"📊 *Network Health Summary*: {health_report['summary']}\n\n"
             f"🏠 *Location*: {location_data.get('name', 'N/A')} (`{location_id}`)\n"
             f"📡 *Pods Online*: {len(nodes_data) - len(health_report['disconnected_nodes'])}/{len(nodes_data)}\n"
-            f"📱 *Devices Connected*: {location_data.get('connectedDevicesCount', 'N/A')}"
+            f"📱 *Devices Connected*: {health_report['connected_devices']}"
         )
         await update.message.reply_markdown(summary)
 
