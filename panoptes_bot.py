@@ -12,6 +12,7 @@ License: MIT
 import logging
 import os
 from typing import Dict
+from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -31,6 +32,7 @@ from plume_api_client import (
     get_locations_for_customer,
     get_nodes_in_location,
     get_location_status,
+    get_wifi_networks,
     analyze_location_health,
     PlumeAPIError,
     PLUME_SSO_URL,
@@ -43,99 +45,48 @@ logger = logging.getLogger(__name__)
 
 # ============ CONVERSATION STATES ============
 (ASK_AUTH_HEADER, ASK_PARTNER_ID) = range(2)
-(ASK_CUSTOMER_ID, SELECT_LOCATION) = range(2) # For new /locations conversation
+(ASK_CUSTOMER_ID, SELECT_LOCATION) = range(2) 
 
-# ============ HEALTH STATUS CONSTANTS ============
-HEALTH_STATUS_EXCELLENT = "excellent"
-HEALTH_STATUS_GOOD = "good"
-HEALTH_STATUS_FAIR = "fair"
-HEALTH_STATUS_POOR = "poor"
-HEALTH_STATUS_UNKNOWN = "unknown"
+# ============ HELPER FUNCTIONS ============
 
-HEALTHY_STATUSES = [HEALTH_STATUS_EXCELLENT, HEALTH_STATUS_GOOD]
-WARNING_STATUSES = [HEALTH_STATUS_POOR, HEALTH_STATUS_FAIR]
+def format_speed_test(speed_test_data: dict) -> str:
+    if not speed_test_data or speed_test_data.get("status") != "succeeded":
+        return "  - No recent speed test data available."
+    download = speed_test_data.get('download', 0)
+    upload = speed_test_data.get('upload', 0)
+    latency = speed_test_data.get('rtt', 0)
+    try:
+        ended_at_str = speed_test_data.get('endedAt', '').split('.')[0]
+        ended_at = datetime.fromisoformat(ended_at_str)
+        ended_at_formatted = ended_at.strftime('%Y-%m-%d %H:%M:%S Z')
+    except (ValueError, TypeError):
+        ended_at_formatted = "N/A"
+    return (
+        f"  - *Download*: {download:.2f} Mbps\n"
+        f"  - *Upload*: {upload:.2f} Mbps\n"
+        f"  - *Latency*: {latency:.2f} ms\n"
+        f"  - *Last Run*: {ended_at_formatted}"
+    )
 
-# ============ HELPER FUNCTIONS FOR STATUS FORMATTING ============
-
-def format_speed_test(speed_test: Dict) -> str:
-    """Format ISP speed test results for display."""
-    download = speed_test.get("download")
-    upload = speed_test.get("upload")
-    latency = speed_test.get("latency")
-    
-    if not any([download, upload, latency]):
-        return "📶 *ISP Speed Test*: No data available\n"
-    
-    lines = ["📶 *ISP Speed Test Results*:"]
-    if download is not None:
-        lines.append(f"  ⬇️ Download: {download:.1f} Mbps")
-    if upload is not None:
-        lines.append(f"  ⬆️ Upload: {upload:.1f} Mbps")
-    if latency is not None:
-        lines.append(f"  ⏱️ Latency: {latency:.0f} ms")
-    
-    return "\n".join(lines) + "\n"
-
-
-def get_pod_status_icon(pod_info: Dict) -> str:
-    """Return the appropriate status icon for a pod."""
-    if not pod_info.get("is_connected"):
-        return "🔴"  # Disconnected
-    
-    health_status = pod_info.get("health_status", HEALTH_STATUS_UNKNOWN).lower()
-    if health_status in WARNING_STATUSES:
-        return "🟡"  # Poor or fair health
-    elif pod_info.get("alerts"):
-        return "🟡"  # Has active alerts
-    else:
-        return "✅"  # Online and healthy
-
-
-def format_backhaul_type(backhaul_type: str) -> str:
-    """Format backhaul type for display."""
-    backhaul_type = backhaul_type.lower() if backhaul_type else "unknown"
-    if backhaul_type == "ethernet":
-        return "🔌 Ethernet"
-    elif backhaul_type == "wifi":
-        return "📡 WiFi"
-    else:
-        return f"📡 {backhaul_type.capitalize()}"
-
-
-def format_pod_details(pods: list) -> str:
-    """Format detailed pod list for display."""
-    if not pods:
-        return "📡 *Pods*: No pods found\n"
-    
-    lines = ["📡 *Pod Details*:"]
-    
-    for pod in pods:
-        nickname = pod.get("nickname", "Unknown Pod")
-        status_icon = get_pod_status_icon(pod)
-        backhaul = format_backhaul_type(pod.get("backhaul_type", "unknown"))
-        
-        # Connection status text
-        if not pod.get("is_connected"):
-            status_text = "Disconnected"
+def format_pod_details(pod_list: list) -> str:
+    if not pod_list:
+        return "  - No pods found for this location."
+    lines = []
+    for pod in pod_list:
+        name = pod.get('name', 'Unknown Pod')
+        conn_state = pod.get('connection_state', 'unknown')
+        health = pod.get('health_status', 'N/A')
+        backhaul = pod.get('backhaul_type', 'N/A').capitalize()
+        if conn_state.lower() == "connected":
+            status_icon = "✅" if health.lower() not in ["fair", "poor"] else "🟡"
+            status_text = f"Online ({health} Health)" if health != "N/A" else "Online"
         else:
-            health_status = pod.get("health_status", HEALTH_STATUS_UNKNOWN)
-            if health_status in HEALTHY_STATUSES:
-                status_text = "Online"
-            elif health_status in WARNING_STATUSES:
-                status_text = f"Online ({health_status.capitalize()} Health)"
-            else:
-                status_text = "Online"
-        
-        line = f"  {status_icon} *{nickname}*: {status_text} | {backhaul}"
-        lines.append(line)
-        
-        # Add alerts if any
-        alerts = pod.get("alerts", [])
-        for alert in alerts:
-            lines.append(f"      ⚠️ _{alert}_")
-    
-    return "\n".join(lines) + "\n"
-
+            status_icon = "🔴"
+            status_text = "Disconnected"
+        lines.append(f"  - `{name}`: {status_icon} {status_text} ({backhaul})")
+        for alert in pod.get('alerts', []):
+            lines.append(f"    - ⚠️ Alert: {alert}")
+    return "\n".join(lines)
 
 # ============ COMMAND HANDLERS ============
 
@@ -144,52 +95,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_oauth_token_valid(user.id):
         await update.message.reply_text(f"Hi {user.first_name}! Welcome. Please run /setup to configure API access.")
     else:
-        await update.message.reply_text(f"Welcome back, {user.first_name}! Run /locations to select a network or /status to get a report.")
+        await update.message.reply_text(f"Welcome back, {user.first_name}! Run /locations to select a network.")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    if not is_oauth_token_valid(user_id):
-        await update.message.reply_text("API access is not configured. Please run /setup.")
-        return
-
     if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
         await update.message.reply_text("You haven't selected a location yet. Please run /locations first.")
         return
-
-    await update.message.reply_text("Fetching network status... this may take a moment.")
-    
+    await update.message.reply_text("Fetching enhanced network status... this may take a moment.")
     try:
         customer_id = context.user_data['customer_id']
         location_id = context.user_data['location_id']
-
         location_data = await get_location_status(user_id, customer_id, location_id)
         nodes_data = await get_nodes_in_location(user_id, customer_id, location_id)
-        
         health_report = analyze_location_health(location_data, nodes_data)
-        
-        # Build comprehensive status report
-        total_pods = len(nodes_data)
-        online_pods = total_pods - len(health_report['disconnected_nodes'])
-        
-        # Header section
         summary_parts = [
             f"📊 *Network Health Summary*: {health_report['summary']}\n",
-            f"🏠 *Location*: {location_data.get('name', 'N/A')} (`{location_id}`)",
-            f"📡 *Pods Online*: {online_pods}/{total_pods}",
-            f"📱 *Devices Connected*: {health_report['connected_devices']}",
-            ""
+            f"🏠 *Location*: {location_data.get('name', 'N/A')} (`{location_id}`)\n",
+            "📡 *Pods Status*:",
+            format_pod_details(health_report['pod_details']),
+            "\n📶 *Last ISP Speed Test*:",
+            format_speed_test(location_data.get("speedTest", {})),
+            "\n" f"📱 *Total Devices Connected*: {health_report['total_connected_devices']}"
         ]
+        summary = "\n".join(summary_parts)
+        await update.message.reply_markdown(summary)
         
-        # ISP Speed Test section
-        speed_test_info = format_speed_test(health_report.get("speed_test", {}))
-        summary_parts.append(speed_test_info)
-        
-        # Pod Details section
-        pod_details = format_pod_details(health_report.get("pods", []))
-        summary_parts.append(pod_details)
-        
-        full_report = "\n".join(summary_parts)
-        await update.message.reply_markdown(full_report)
+        # Follow-up with suggested commands
+        keyboard = [
+            [InlineKeyboardButton("Get Node Details", callback_data='nav_nodes')],
+            [InlineKeyboardButton("List WiFi Networks", callback_data='nav_wifi')],
+            [InlineKeyboardButton("Change Location", callback_data='nav_locations')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text('What would you like to do next?', reply_markup=reply_markup)
 
     except PlumeAPIError as e:
         await update.message.reply_text(f"An API error occurred: {e}")
@@ -197,59 +136,116 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"An unexpected error in /status: {e}")
         await update.message.reply_text("An unexpected error occurred.")
 
+async def nodes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays detailed information about each node."""
+    user_id = update.effective_user.id
+    if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
+        await update.message.reply_text("Please select a location with /locations first.")
+        return
+    await update.message.reply_text("Fetching node details...")
+    try:
+        nodes_data = await get_nodes_in_location(user_id, context.user_data['customer_id'], context.user_data['location_id'])
+        if not nodes_data:
+            await update.message.reply_text("No nodes found for this location.")
+            return
+
+        report_parts = ["*Node Details*\n"]
+        for node in nodes_data:
+            name = node.get('defaultName', node.get('id'))
+            report_parts.append(
+                f"• *{name}*:\n"
+                f"  - *State*: {node.get('connectionState', 'N/A')}\n"
+                f"  - *Model*: {node.get('model', 'N/A')}\n"
+                f"  - *Firmware*: {node.get('firmwareVersion', 'N/A')}\n"
+                f"  - *MAC*: `{node.get('mac', 'N/A')}`\n"
+                f"  - *IP*: `{node.get('ip', 'N/A')}`"
+            )
+        await update.message.reply_markdown("\n".join(report_parts))
+    except PlumeAPIError as e:
+        await update.message.reply_text(f"An API error occurred: {e}")
+
+async def wifi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays WiFi network configuration."""
+    user_id = update.effective_user.id
+    if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
+        await update.message.reply_text("Please select a location with /locations first.")
+        return
+    await update.message.reply_text("Fetching WiFi networks...")
+    try:
+        wifi_data = await get_wifi_networks(user_id, context.user_data['customer_id'], context.user_data['location_id'])
+        if not wifi_data:
+            await update.message.reply_text("No WiFi networks found.")
+            return
+        
+        report_parts = ["*WiFi Network Configuration*\n"]
+        for network in wifi_data:
+            ssid = network.get("ssid", "N/A")
+            enabled = "Enabled" if network.get("enable", False) else "Disabled"
+            wpa_mode = network.get("wpaMode", "N/A")
+            report_parts.append(
+                f"• *{ssid}* ({enabled}):\n"
+                f"  - *Security*: {wpa_mode}"
+            )
+        await update.message.reply_markdown("\n".join(report_parts))
+    except PlumeAPIError as e:
+        await update.message.reply_text(f"An API error occurred: {e}")
+
+# ============ NAVIGATION CALLBACK HANDLER ============
+
+async def navigation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles callbacks from navigational keyboards."""
+    query = update.callback_query
+    await query.answer()
+    
+    command = query.data.split('_')[1] # e.g., 'nav_nodes' -> 'nodes'
+
+    if command == 'nodes':
+        await query.message.delete() # Clean up the button message
+        await nodes(update, context)
+    elif command == 'wifi':
+        await query.message.delete()
+        await wifi(update, context)
+    elif command == 'locations':
+        await query.message.delete()
+        await locations_start(update, context)
+
 # ============ LOCATION SELECTION CONVERSATION ============
 
 async def locations_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Starts the location selection process by asking for a Customer ID."""
     user_id = update.effective_user.id
     if not is_oauth_token_valid(user_id):
         await update.message.reply_text("API access is not configured. Please run /setup.")
         return ConversationHandler.END
-
-    await update.message.reply_text("Please provide the Customer ID you want to inspect.")
+    await update.message.reply_text("Please provide the Customer ID to inspect.")
     return ASK_CUSTOMER_ID
 
 async def customer_id_provided(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handles the provided Customer ID and fetches its locations."""
     customer_id = update.message.text.strip()
     context.user_data['customer_id'] = customer_id
     user_id = update.effective_user.id
-
     await update.message.reply_text(f"Customer `{customer_id}` selected. Fetching locations...")
-
     try:
         locations = await get_locations_for_customer(user_id, customer_id)
         if not locations:
-            await update.message.reply_text("Could not find any locations for this customer. Please try /locations again with a different ID.")
+            await update.message.reply_text("No locations found for this customer. Try /locations again.")
             return ConversationHandler.END
-
-        keyboard = []
-        for loc in locations:
-            callback_data = loc.get('id')
-            button = InlineKeyboardButton(loc.get('name', 'Unnamed Location'), callback_data=callback_data)
-            keyboard.append([button])
-        
+        keyboard = [[InlineKeyboardButton(loc.get('name', 'Unnamed'), callback_data=loc.get('id'))] for loc in locations]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text('Please choose a location:', reply_markup=reply_markup)
         return SELECT_LOCATION
-
     except PlumeAPIError as e:
-        await update.message.reply_text(f"API Error: {e}\n\nPlease check the Customer ID and try again.")
+        await update.message.reply_text(f"API Error: {e}\nPlease check the Customer ID and try again.")
         return ConversationHandler.END
 
 async def location_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handles the user's location choice."""
     query = update.callback_query
     await query.answer()
-
     location_id = query.data
     context.user_data['location_id'] = location_id
-
-    await query.edit_message_text(text=f"Location selected: `{location_id}`\nRun /status to get a report.")
+    await query.edit_message_text(text=f"Location selected: `{location_id}`\n\nNext, run /status to get a health report.")
     return ConversationHandler.END
 
 async def locations_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancels the location selection."""
     await update.message.reply_text("Location selection cancelled.")
     return ConversationHandler.END
 
@@ -272,21 +268,16 @@ async def confirm_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     partner_id = update.message.text
     auth_header = context.user_data.get('auth_header')
     user_id = update.effective_user.id
-
-    auth_config = {
-        "sso_url": PLUME_SSO_URL, "auth_header": auth_header,
-        "partner_id": partner_id, "plume_api_base": PLUME_API_BASE,
-    }
+    auth_config = {"sso_url": PLUME_SSO_URL, "auth_header": auth_header, "partner_id": partner_id, "plume_api_base": PLUME_API_BASE}
     set_user_auth(user_id, auth_config)
-
     await update.message.reply_text("Testing API connection...")
     try:
         new_token_data = await get_oauth_token(auth_config)
         auth_config.update(new_token_data)
-        await update.message.reply_text("✅ **Success!** API connection is working.\nRun /locations to begin.")
+        await update.message.reply_text("✅ **Success!** API connection is working.\n\nNext, run /locations to begin.")
         return ConversationHandler.END
     except (PlumeAPIError, ValueError) as e:
-        await update.message.reply_text(f"❌ **Failed!** {e}\nPlease check your details and run /setup again.")
+        await update.message.reply_text(f"❌ **Failed!** {e}\nPlease run /setup again.")
         return ConversationHandler.END
 
 async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -296,7 +287,6 @@ async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 # ============ BOT MAIN ENTRY POINT ============
 
 def main() -> None:
-    """Sets up and runs the Telegram bot."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set!")
@@ -316,15 +306,18 @@ def main() -> None:
         entry_points=[CommandHandler("locations", locations_start)],
         states={
             ASK_CUSTOMER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_id_provided)],
-            SELECT_LOCATION: [CallbackQueryHandler(location_selected)],
+            SELECT_LOCATION: [CallbackQueryHandler(location_selected, pattern='^((?!nav_).)*$')], # Avoid conflict with nav handler
         },
         fallbacks=[CommandHandler("cancel", locations_cancel)],
     )
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("nodes", nodes))
+    application.add_handler(CommandHandler("wifi", wifi))
     application.add_handler(setup_handler)
     application.add_handler(locations_handler)
+    application.add_handler(CallbackQueryHandler(navigation_handler, pattern='^nav_'))
 
     logger.info("Bot is starting...")
     application.run_polling()
