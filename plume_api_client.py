@@ -194,13 +194,11 @@ def analyze_location_health(location: dict, service_level: dict, nodes: list, de
         "summary": ""
     }
     
-    total_pods = 0
     connected_pods = 0
 
     if isinstance(nodes, list):
         for node in nodes:
             if isinstance(node, dict):
-                total_pods += 1
                 if node.get("connectionState", "").lower() == "connected":
                     connected_pods += 1
                 else:
