@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 user_auth: Dict[int, Dict] = {}
 
+# ============ HEALTH STATUS CONSTANTS ============
+HEALTH_STATUS_POOR = "poor"
+HEALTH_STATUS_FAIR = "fair"
+WARNING_HEALTH_STATUSES = [HEALTH_STATUS_POOR, HEALTH_STATUS_FAIR]
+
 # ============ EXCEPTIONS ============
 
 class PlumeAPIError(Exception):
@@ -170,8 +175,15 @@ def analyze_location_health(location_data: dict, nodes: list) -> dict:
         "issues": [], 
         "warnings": [], 
         "disconnected_nodes": [], 
+        "pods_with_warnings": [],
         "summary": "",
-        "connected_devices": 0
+        "connected_devices": 0,
+        "pods": [],  # Detailed pod information
+        "speed_test": {
+            "download": None,
+            "upload": None,
+            "latency": None
+        }
     }
     
     connected_pods = 0
@@ -188,6 +200,16 @@ def analyze_location_health(location_data: dict, nodes: list) -> dict:
                 nickname = node.get("nickname", node.get("id", "Unknown Pod"))
                 health_report["disconnected_nodes"].append(nickname)
                 health_report["issues"].append(f"🔴 Pod '{nickname}' is disconnected")
+            # Track pods with health warnings (connected but not healthy)
+            elif is_connected and health_status in WARNING_HEALTH_STATUSES:
+                health_report["pods_with_warnings"].append(nickname)
+                health_report["warnings"].append(f"🟡 Pod '{nickname}' has {health_status} health")
+            # Track pods with active alerts
+            elif is_connected and active_alerts:
+                if nickname not in health_report["pods_with_warnings"]:
+                    health_report["pods_with_warnings"].append(nickname)
+                for alert in active_alerts:
+                    health_report["warnings"].append(f"⚠️ Pod '{nickname}': {alert}")
 
     health_report["connected_devices"] = total_connected_devices
 
