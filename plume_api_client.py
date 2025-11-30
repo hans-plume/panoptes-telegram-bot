@@ -162,7 +162,8 @@ async def get_location_status(user_id: int, customer_id: str, location_id: str) 
 def analyze_location_health(location_data: dict, nodes: list) -> dict:
     """
     Comprehensive health analysis for a location.
-    A location is considered "online" if at least one gateway POD is connected.
+    A location is considered "online" if at least one pod of any type is connected.
+    A location is "offline" only if all pods are disconnected.
     """
     health_report = {
         "online": False, 
@@ -173,39 +174,34 @@ def analyze_location_health(location_data: dict, nodes: list) -> dict:
         "connected_devices": 0
     }
     
-    connected_gateways = 0
+    connected_pods = 0
     total_connected_devices = 0
 
     if isinstance(nodes, list):
         for node in nodes:
-            is_gateway = node.get('backhaulType') == 'ethernet'
             is_connected = node.get("connectionState", "").lower() == "connected"
 
             if is_connected:
+                connected_pods += 1
                 total_connected_devices += node.get("connectedDeviceCount", 0)
-
-            if is_gateway and is_connected:
-                connected_gateways += 1
-            
-            if not is_connected:
+            else:
                 nickname = node.get("nickname", node.get("id", "Unknown Pod"))
                 health_report["disconnected_nodes"].append(nickname)
                 health_report["issues"].append(f"🔴 Pod '{nickname}' is disconnected")
 
     health_report["connected_devices"] = total_connected_devices
 
-    # New Rule: Location is online if at least one gateway is connected.
-    if connected_gateways > 0:
+    # Location is online if at least one pod (of any type) is connected.
+    if connected_pods > 0:
         health_report["online"] = True
     
-    # --- NEW SUMMARY LOGIC ---
-    # Determine the final summary based on the user's requested phrasing
+    # Determine the final summary based on the location's health status
     if not health_report["online"]:
-        health_report["summary"] = "🔴 LOCATION IS OFFLINE - No gateways are connected."
+        health_report["summary"] = "🔴 LOCATION IS OFFLINE - All pods are disconnected."
     elif health_report["issues"]:
         num_issues = len(health_report['issues'])
-        pod_plural = "pod" if num_issues == 1 else "pods"
-        health_report["summary"] = f"🟠 LOCATION ONLINE, but {num_issues} {pod_plural} are disconnected."
+        pod_plural = "pod is" if num_issues == 1 else "pods are"
+        health_report["summary"] = f"🟠 LOCATION ONLINE, but {num_issues} {pod_plural} disconnected."
     elif location_data.get("serviceLevel", {}).get("status") != "fullService":
         health_report["summary"] = "🟡 DEGRADED SERVICE"
         health_report["warnings"].append("Service level is not optimal.")
