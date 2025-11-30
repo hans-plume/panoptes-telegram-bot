@@ -21,11 +21,6 @@ logger = logging.getLogger(__name__)
 
 user_auth: Dict[int, Dict] = {}
 
-# ============ HEALTH STATUS CONSTANTS ============
-HEALTH_STATUS_POOR = "poor"
-HEALTH_STATUS_FAIR = "fair"
-WARNING_HEALTH_STATUSES = [HEALTH_STATUS_POOR, HEALTH_STATUS_FAIR]
-
 # ============ EXCEPTIONS ============
 
 class PlumeAPIError(Exception):
@@ -162,68 +157,77 @@ async def get_location_status(user_id: int, customer_id: str, location_id: str) 
     """Get location health and status information."""
     return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}")
 
+async def get_wifi_networks(user_id: int, customer_id: str, location_id: str) -> list:
+    """Get WiFi networks configured for a location."""
+    return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}/wifiNetworks")
+
 # ============ SERVICE HEALTH ANALYSIS ============
 
 def analyze_location_health(location_data: dict, nodes: list) -> dict:
     """
     Comprehensive health analysis for a location.
-    A location is considered "online" if at least one pod of any type is connected.
-    A location is "offline" only if all pods are disconnected.
+    A location is considered "online" if at least one pod is connected.
     """
     health_report = {
-        "online": False, 
-        "issues": [], 
-        "warnings": [], 
-        "disconnected_nodes": [], 
-        "pods_with_warnings": [],
+        "online": False,
         "summary": "",
-        "connected_devices": 0,
-        "pods": [],  # Detailed pod information
-        "speed_test": {
-            "download": None,
-            "upload": None,
-            "latency": None
-        }
+        "issues": [],
+        "warnings": [],
+        "pod_details": [],
+        "total_connected_devices": 0,
     }
-    
+
+    if not isinstance(nodes, list) or not nodes:
+        health_report["summary"] = "🔴 LOCATION IS OFFLINE - No pods found for this location."
+        return health_report
+
     connected_pods = 0
     total_connected_devices = 0
+    unhealthy_pods = 0
 
-    if isinstance(nodes, list):
-        for node in nodes:
-            is_connected = node.get("connectionState", "").lower() == "connected"
+    for node in nodes:
+        is_connected = node.get("connectionState", "").lower() == "connected"
+        nickname = node.get("defaultName", node.get("id", "Unknown Pod"))
+        health = node.get("health") or {}
+        health_status = health.get("status", "N/A")
 
-            if is_connected:
-                connected_pods += 1
-                total_connected_devices += node.get("connectedDeviceCount", 0)
-            else:
-                nickname = node.get("nickname", node.get("id", "Unknown Pod"))
-                health_report["disconnected_nodes"].append(nickname)
-                health_report["issues"].append(f"🔴 Pod '{nickname}' is disconnected")
-            # Track pods with health warnings (connected but not healthy)
-            elif is_connected and health_status in WARNING_HEALTH_STATUSES:
-                health_report["pods_with_warnings"].append(nickname)
-                health_report["warnings"].append(f"🟡 Pod '{nickname}' has {health_status} health")
-            # Track pods with active alerts
-            elif is_connected and active_alerts:
-                if nickname not in health_report["pods_with_warnings"]:
-                    health_report["pods_with_warnings"].append(nickname)
-                for alert in active_alerts:
-                    health_report["warnings"].append(f"⚠️ Pod '{nickname}': {alert}")
+        pod_info = {
+            "name": nickname,
+            "connection_state": node.get("connectionState", "unknown"),
+            "health_status": health_status,
+            "backhaul_type": node.get("backhaulType", "unknown"),
+            "alerts": [alert.get("type") for alert in node.get("alerts", [])],
+        }
+        health_report["pod_details"].append(pod_info)
 
-    health_report["connected_devices"] = total_connected_devices
+        if is_connected:
+            connected_pods += 1
+            total_connected_devices += node.get("connectedDeviceCount", 0)
 
-    # Location is online if at least one pod (of any type) is connected.
-    if connected_pods > 0:
-        health_report["online"] = True
+            if health_status.lower() in ["fair", "poor"]:
+                unhealthy_pods += 1
+                health_report["warnings"].append(f"Pod '{nickname}' has {health_status} health.")
+            
+            for alert in pod_info["alerts"]:
+                health_report["warnings"].append(f"Pod '{nickname}' has an active alert: {alert}")
+
+        else:
+            health_report["issues"].append(f"Pod '{nickname}' is disconnected.")
+
+    health_report["total_connected_devices"] = total_connected_devices
+    health_report["online"] = connected_pods > 0
     
-    # Determine the final summary based on the location's health status
+    # --- NEW SUMMARY LOGIC ---
     if not health_report["online"]:
         health_report["summary"] = "🔴 LOCATION IS OFFLINE - All pods are disconnected."
     elif health_report["issues"]:
         num_issues = len(health_report['issues'])
-        pod_plural = "pod is" if num_issues == 1 else "pods are"
-        health_report["summary"] = f"🟠 LOCATION ONLINE, but {num_issues} {pod_plural} disconnected."
+        pod_plural = "pod" if num_issues == 1 else "pods"
+        health_report["summary"] = f"🟠 LOCATION ONLINE, but {num_issues} {pod_plural} are disconnected."
+    elif health_report["warnings"]:
+        num_warnings = len(health_report["warnings"])
+        warning_plural = "issue" if num_warnings == 1 else "issues"
+        health_report["summary"] = f"🟡 LOCATION ONLINE, but with {num_warnings} health {warning_plural}."
     elif location_data.get("serviceLevel", {}).get("status") != "fullService":
         health_report["summary"] = "🟡 DEGRADED SERVICE"
         health_report["warnings"].append("Service level is not optimal.")
