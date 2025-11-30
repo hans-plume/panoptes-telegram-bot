@@ -45,6 +45,98 @@ logger = logging.getLogger(__name__)
 (ASK_AUTH_HEADER, ASK_PARTNER_ID) = range(2)
 (ASK_CUSTOMER_ID, SELECT_LOCATION) = range(2) # For new /locations conversation
 
+# ============ HEALTH STATUS CONSTANTS ============
+HEALTH_STATUS_EXCELLENT = "excellent"
+HEALTH_STATUS_GOOD = "good"
+HEALTH_STATUS_FAIR = "fair"
+HEALTH_STATUS_POOR = "poor"
+HEALTH_STATUS_UNKNOWN = "unknown"
+
+HEALTHY_STATUSES = [HEALTH_STATUS_EXCELLENT, HEALTH_STATUS_GOOD]
+WARNING_STATUSES = [HEALTH_STATUS_POOR, HEALTH_STATUS_FAIR]
+
+# ============ HELPER FUNCTIONS FOR STATUS FORMATTING ============
+
+def format_speed_test(speed_test: Dict) -> str:
+    """Format ISP speed test results for display."""
+    download = speed_test.get("download")
+    upload = speed_test.get("upload")
+    latency = speed_test.get("latency")
+    
+    if not any([download, upload, latency]):
+        return "📶 *ISP Speed Test*: No data available\n"
+    
+    lines = ["📶 *ISP Speed Test Results*:"]
+    if download is not None:
+        lines.append(f"  ⬇️ Download: {download:.1f} Mbps")
+    if upload is not None:
+        lines.append(f"  ⬆️ Upload: {upload:.1f} Mbps")
+    if latency is not None:
+        lines.append(f"  ⏱️ Latency: {latency:.0f} ms")
+    
+    return "\n".join(lines) + "\n"
+
+
+def get_pod_status_icon(pod_info: Dict) -> str:
+    """Return the appropriate status icon for a pod."""
+    if not pod_info.get("is_connected"):
+        return "🔴"  # Disconnected
+    
+    health_status = pod_info.get("health_status", HEALTH_STATUS_UNKNOWN).lower()
+    if health_status in WARNING_STATUSES:
+        return "🟡"  # Poor or fair health
+    elif pod_info.get("alerts"):
+        return "🟡"  # Has active alerts
+    else:
+        return "✅"  # Online and healthy
+
+
+def format_backhaul_type(backhaul_type: str) -> str:
+    """Format backhaul type for display."""
+    backhaul_type = backhaul_type.lower() if backhaul_type else "unknown"
+    if backhaul_type == "ethernet":
+        return "🔌 Ethernet"
+    elif backhaul_type == "wifi":
+        return "📡 WiFi"
+    else:
+        return f"📡 {backhaul_type.capitalize()}"
+
+
+def format_pod_details(pods: list) -> str:
+    """Format detailed pod list for display."""
+    if not pods:
+        return "📡 *Pods*: No pods found\n"
+    
+    lines = ["📡 *Pod Details*:"]
+    
+    for pod in pods:
+        nickname = pod.get("nickname", "Unknown Pod")
+        status_icon = get_pod_status_icon(pod)
+        backhaul = format_backhaul_type(pod.get("backhaul_type", "unknown"))
+        
+        # Connection status text
+        if not pod.get("is_connected"):
+            status_text = "Disconnected"
+        else:
+            health_status = pod.get("health_status", HEALTH_STATUS_UNKNOWN)
+            if health_status in HEALTHY_STATUSES:
+                status_text = "Online"
+            elif health_status in WARNING_STATUSES:
+                status_text = f"Online ({health_status.capitalize()} Health)"
+            else:
+                status_text = "Online"
+        
+        line = f"  {status_icon} *{nickname}*: {status_text} | {backhaul}"
+        lines.append(line)
+        
+        # Add alerts if any
+        alerts = pod.get("alerts", [])
+        for alert in alerts:
+            lines.append(f"      ⚠️ _{alert}_")
+    
+    return "\n".join(lines) + "\n"
+
+
 # ============ COMMAND HANDLERS ============
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -75,13 +167,29 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
         health_report = analyze_location_health(location_data, nodes_data)
         
-        summary = (
-            f"📊 *Network Health Summary*: {health_report['summary']}\n\n"
-            f"🏠 *Location*: {location_data.get('name', 'N/A')} (`{location_id}`)\n"
-            f"📡 *Pods Online*: {len(nodes_data) - len(health_report['disconnected_nodes'])}/{len(nodes_data)}\n"
-            f"📱 *Devices Connected*: {health_report['connected_devices']}"
-        )
-        await update.message.reply_markdown(summary)
+        # Build comprehensive status report
+        total_pods = len(nodes_data)
+        online_pods = total_pods - len(health_report['disconnected_nodes'])
+        
+        # Header section
+        summary_parts = [
+            f"📊 *Network Health Summary*: {health_report['summary']}\n",
+            f"🏠 *Location*: {location_data.get('name', 'N/A')} (`{location_id}`)",
+            f"📡 *Pods Online*: {online_pods}/{total_pods}",
+            f"📱 *Devices Connected*: {health_report['connected_devices']}",
+            ""
+        ]
+        
+        # ISP Speed Test section
+        speed_test_info = format_speed_test(health_report.get("speed_test", {}))
+        summary_parts.append(speed_test_info)
+        
+        # Pod Details section
+        pod_details = format_pod_details(health_report.get("pods", []))
+        summary_parts.append(pod_details)
+        
+        full_report = "\n".join(summary_parts)
+        await update.message.reply_markdown(full_report)
 
     except PlumeAPIError as e:
         await update.message.reply_text(f"An API error occurred: {e}")
