@@ -1,422 +1,365 @@
 """
-Plume Cloud API Client Module
+Panoptes Telegram Bot - Plume Cloud Network Monitoring
+========================================================
 
-This module provides OAuth 2.0 authentication and API wrappers for the Plume Cloud platform.
-It handles token management, automatic token refresh, and all API endpoint interactions.
+A production-ready Telegram bot for real-time monitoring of Plume Cloud networks.
+
+Author: Hans V.
+++ Nice Suit. John Philips, London. I Have Two Myself. -> H. Gruber ++
+License: MIT
 """
 
 import logging
-import httpx
 import os
-from typing import Optional, Dict, List
-from datetime import datetime, timedelta
+from typing import Dict
+from datetime import datetime
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+)
+
+from plume_api_client import (
+    set_user_auth,
+    is_oauth_token_valid,
+    get_oauth_token,
+    get_locations_for_customer,
+    get_nodes_in_location,
+    get_location_status,
+    get_wifi_networks,
+    get_wan_stats,
+    analyze_location_health,
+    analyze_wan_stats,
+    format_wan_analysis,
+    PlumeAPIError,
+    PLUME_SSO_URL,
+    PLUME_API_BASE,
+)
 
 # ============ CONFIGURATION & LOGGING ============
-
-PLUME_API_BASE = os.getenv("PLUME_API_BASE", "https://piranha-gamma.prod.us-west-2.aws.plumenet.io/api/")
-PLUME_REPORTS_BASE = os.getenv("PLUME_REPORTS_BASE", "https://piranha-gamma.prod.us-west-2.aws.plumenet.io/reports/")
-PLUME_SSO_URL = "https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token"
-PLUME_TIMEOUT = 10  # seconds
-
-# ============ WAN STATS THRESHOLDS ============
-WAN_STATS_THRESHOLDS = {
-    "high_rx_mbps": 50,  # High receive bandwidth
-    "high_tx_mbps": 50,  # High transmit bandwidth
-    "null_data_threshold": 0.3,  # Alert if > 30% of data points are null
-}
-
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-user_auth: Dict[int, Dict] = {}
+# ============ CONVERSATION STATES ============
+(ASK_AUTH_HEADER, ASK_PARTNER_ID) = range(2)
+(ASK_CUSTOMER_ID, SELECT_LOCATION) = range(2) 
 
-# ============ EXCEPTIONS ============
+# ============ HELPER FUNCTIONS ============
 
-class PlumeAPIError(Exception):
-    """Base exception for Plume API errors."""
-    pass
-
-# ============ AUTHENTICATION MANAGEMENT ============
-
-def set_user_auth(user_id: int, auth_config: Dict) -> None:
-    """Store user's OAuth configuration and tokens."""
-    user_auth[user_id] = auth_config
-    logger.info("Authentication stored for user %s", user_id)
-
-
-def get_user_auth(user_id: int) -> Optional[Dict]:
-    """Retrieve user's OAuth configuration."""
-    return user_auth.get(user_id)
-
-
-def is_oauth_token_valid(user_id: int) -> bool:
-    """Check if user has a valid OAuth token."""
-    auth = get_user_auth(user_id)
-    if not auth or not auth.get("token_expiry"):
-        return False
-    return datetime.now() < auth["token_expiry"]
-
-
-async def get_oauth_token(auth_config: Dict) -> Dict:
-    """Obtain OAuth token from Plume SSO."""
+def format_speed_test(speed_test_data: dict) -> str:
+    if not speed_test_data or speed_test_data.get("status") != "succeeded":
+        return "  - No recent speed test data available."
+    download = speed_test_data.get('download', 0)
+    upload = speed_test_data.get('upload', 0)
+    latency = speed_test_data.get('rtt', 0)
     try:
-        sso_url = auth_config.get("sso_url")
-        auth_header = auth_config.get("auth_header")
-        partner_id = auth_config.get("partner_id")
+        ended_at_str = speed_test_data.get('endedAt', '').split('.')[0]
+        ended_at = datetime.fromisoformat(ended_at_str)
+        ended_at_formatted = ended_at.strftime('%Y-%m-%d %H:%M:%S Z')
+    except (ValueError, TypeError):
+        ended_at_formatted = "N/A"
+    return (
+        f"  - *Download*: {download:.2f} Mbps\n"
+        f"  - *Upload*: {upload:.2f} Mbps\n"
+        f"  - *Latency*: {latency:.2f} ms\n"
+        f"  - *Last Run*: {ended_at_formatted}"
+    )
 
-        if not all([sso_url, auth_header, partner_id]):
-            raise ValueError("Incomplete OAuth configuration")
+def format_pod_details(pod_list: list) -> str:
+    if not pod_list:
+        return "  - No pods found for this location."
+    lines = []
+    for pod in pod_list:
+        name = pod.get('name', 'Unknown Pod')
+        conn_state = pod.get('connection_state', 'unknown')
+        health = pod.get('health_status', 'N/A')
+        backhaul = pod.get('backhaul_type', 'N/A').capitalize()
+        if conn_state.lower() == "connected":
+            status_icon = "✅" if health.lower() not in ["fair", "poor"] else "🟡"
+            status_text = f"Online ({health} Health)" if health != "N/A" else "Online"
+        else:
+            status_icon = "🔴"
+            status_text = "Disconnected"
+        lines.append(f"  - `{name}`: {status_icon} {status_text} ({backhaul})")
+        for alert in pod.get('alerts', []):
+            lines.append(f"    - ⚠️ Alert: {alert}")
+    return "\n".join(lines)
 
-        headers = {"Authorization": auth_header, "Content-Type": "application/x-www-form-urlencoded"}
-        data = {"scope": f"partnerId:{partner_id} role:partnerIdAdmin", "grant_type": "client_credentials"}
+# ============ COMMAND HANDLERS ============
 
-        async with httpx.AsyncClient(timeout=PLUME_TIMEOUT) as client:
-            resp = await client.post(sso_url, headers=headers, data=data)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not is_oauth_token_valid(user.id):
+        await update.message.reply_text(f"Hi {user.first_name}! Welcome. Please run /setup to configure API access.")
+    else:
+        await update.message.reply_text(f"Welcome back, {user.first_name}! Run /locations to select a network.")
 
-        resp.raise_for_status()
-        token_data = resp.json()
-        access_token = token_data.get("access_token")
-        expires_in = token_data.get("expires_in", 3600)
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
+        await update.message.reply_text("You haven't selected a location yet. Please run /locations first.")
+        return
+    await update.message.reply_text("Fetching enhanced network status... this may take a moment.")
+    try:
+        customer_id = context.user_data['customer_id']
+        location_id = context.user_data['location_id']
+        location_data = await get_location_status(user_id, customer_id, location_id)
+        nodes_data = await get_nodes_in_location(user_id, customer_id, location_id)
+        health_report = analyze_location_health(location_data, nodes_data)
+        summary_parts = [
+            f"📊 *Network Health Summary*: {health_report['summary']}\n",
+            f"🏠 *Location*: {location_data.get('name', 'N/A')} (`{location_id}`)\n",
+            "📡 *Pods Status*:",
+            format_pod_details(health_report['pod_details']),
+            "\n📶 *Last ISP Speed Test*:",
+            format_speed_test(location_data.get("speedTest", {})),
+            "\n" f"📱 *Total Devices Connected*: {health_report['total_connected_devices']}"
+        ]
+        summary = "\n".join(summary_parts)
+        await update.message.reply_markdown(summary)
+        
+        # Follow-up with suggested commands
+        keyboard = [
+            [InlineKeyboardButton("WAN Analysis", callback_data='nav_wan')],
+            [InlineKeyboardButton("Get Node Details", callback_data='nav_nodes')],
+            [InlineKeyboardButton("List WiFi Networks", callback_data='nav_wifi')],
+            [InlineKeyboardButton("Change Location", callback_data='nav_locations')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text('What would you like to do next?', reply_markup=reply_markup)
 
-        if not access_token:
-            raise PlumeAPIError("No access_token in OAuth response")
-
-        token_expiry = datetime.now() + timedelta(seconds=int(expires_in) - 60)
-        logger.info("OAuth token obtained successfully")
-        return {"access_token": access_token, "token_expiry": token_expiry}
-
-    except httpx.RequestError as e:
-        logger.error("Network error during OAuth: %s", e)
-        raise PlumeAPIError("Network error during OAuth authentication") from e
+    except PlumeAPIError as e:
+        await update.message.reply_text(f"An API error occurred: {e}")
     except Exception as e:
-        logger.error("OAuth error: %s", e)
-        raise PlumeAPIError(f"An unexpected error occurred during OAuth: {e}") from e
+        logger.error(f"An unexpected error in /status: {e}")
+        await update.message.reply_text("An unexpected error occurred.")
 
-# ============ PLUME API CLIENT ============
-
-async def plume_request(user_id: int, method: str, endpoint: str, params: Optional[Dict] = None, json_data: Optional[Dict] = None, use_reports_api: bool = False) -> dict:
-    """Generic function to call the Plume Cloud API."""
-    auth_config = get_user_auth(user_id)
-    if not auth_config:
-        raise PlumeAPIError("No authentication details found. Please use /setup to configure.")
-
-    if not is_oauth_token_valid(user_id):
-        logger.info("OAuth token for user %s is expired. Refreshing...", user_id)
-        try:
-            new_token_data = await get_oauth_token(auth_config)
-            auth_config.update(new_token_data)
-        except PlumeAPIError as e:
-            raise PlumeAPIError("Could not refresh token. Please re-authenticate with /setup.") from e
-
-    token = auth_config.get("access_token")
-    
-    if use_reports_api:
-        api_base = auth_config.get("plume_reports_base", PLUME_REPORTS_BASE)
-    else:
-        api_base = auth_config.get("plume_api_base", PLUME_API_BASE)
-    
-    url = f"{api_base.rstrip('/')}/{endpoint.lstrip('/')}"
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-
+async def nodes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays detailed information about each node."""
+    user_id = update.effective_user.id
+    if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
+        await update.message.reply_text("Please select a location with /locations first.")
+        return
+    await update.message.reply_text("Fetching node details...")
     try:
-        async with httpx.AsyncClient(timeout=PLUME_TIMEOUT) as client:
-            resp = await client.request(method=method.upper(), url=url, params=params, json=json_data, headers=headers)
+        nodes_data = await get_nodes_in_location(user_id, context.user_data['customer_id'], context.user_data['location_id'])
+        if not nodes_data:
+            await update.message.reply_text("No nodes found for this location.")
+            return
+
+        report_parts = ["*Node Details*\n"]
+        for node in nodes_data:
+            name = node.get('defaultName', node.get('id'))
+            report_parts.append(
+                f"• *{name}*:\n"
+                f"  - *State*: {node.get('connectionState', 'N/A')}\n"
+                f"  - *Model*: {node.get('model', 'N/A')}\n"
+                f"  - *Firmware*: {node.get('firmwareVersion', 'N/A')}\n"
+                f"  - *MAC*: `{node.get('mac', 'N/A')}`\n"
+                f"  - *IP*: `{node.get('ip', 'N/A')}`"
+            )
+        await update.message.reply_markdown("\n".join(report_parts))
+    except PlumeAPIError as e:
+        await update.message.reply_text(f"An API error occurred: {e}")
+
+async def wifi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays WiFi network configuration."""
+    user_id = update.effective_user.id
+    if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
+        await update.message.reply_text("Please select a location with /locations first.")
+        return
+    await update.message.reply_text("Fetching WiFi networks...")
+    try:
+        wifi_data = await get_wifi_networks(user_id, context.user_data['customer_id'], context.user_data['location_id'])
+        if not wifi_data:
+            await update.message.reply_text("No WiFi networks found.")
+            return
         
-        if 400 <= resp.status_code < 500:
-             logger.error("Plume API returned client error %s: %s", resp.status_code, resp.text[:300])
-             raise PlumeAPIError(f"Plume API client error (status {resp.status_code}). Check your request.")
+        report_parts = ["*WiFi Network Configuration*\n"]
+        for network in wifi_data:
+            ssid = network.get("ssid", "N/A")
+            enabled = "Enabled" if network.get("enable", False) else "Disabled"
+            wpa_mode = network.get("wpaMode", "N/A")
+            report_parts.append(
+                f"• *{ssid}* ({enabled}):\n"
+                f"  - *Security*: {wpa_mode}"
+            )
+        await update.message.reply_markdown("\n".join(report_parts))
+    except PlumeAPIError as e:
+        await update.message.reply_text(f"An API error occurred: {e}")
+
+async def wan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the /wan command and provides a WAN health analysis."""
+    user_id = update.effective_user.id
+    if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
+        await update.message.reply_text("Please select a location with /locations first.")
+        return
+    
+    await update.message.reply_text("Fetching WAN statistics for the last 24 hours...")
+    
+    try:
+        customer_id = context.user_data['customer_id']
+        location_id = context.user_data['location_id']
         
-        resp.raise_for_status()
-        return resp.json()
+        # Fetch and analyze WAN statistics
+        wan_stats_data = await get_wan_stats(user_id, customer_id, location_id, period="daily")
+        wan_analysis = analyze_wan_stats(wan_stats_data)
+        
+        # Format and send the report
+        report_str = format_wan_analysis(wan_analysis)
+        await update.message.reply_markdown(report_str)
+        
+    except PlumeAPIError as e:
+        await update.message.reply_text(f"An API error occurred while fetching WAN stats: {e}")
+    except Exception as e:
+        logger.error(f"An unexpected error in /wan: {e}")
+        await update.message.reply_text("An unexpected error occurred during WAN analysis.")
 
-    except httpx.TimeoutException as e:
-        raise PlumeAPIError("Request timed out. Plume Cloud is taking too long.") from e
-    except httpx.RequestError as e:
-        raise PlumeAPIError("Network error while contacting Plume Cloud.") from e
+# ============ NAVIGATION CALLBACK HANDLER ============
 
-# ============ BUSINESS LOGIC / PLUME API WRAPPERS ============
+async def navigation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles callbacks from navigational keyboards."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Ensure update.message exists for command handlers
+    if not hasattr(update, 'message'):
+        update.message = query.message
+    
+    command = query.data.split('_')[1] # e.g., 'nav_nodes' -> 'nodes'
 
-async def get_customers(user_id: int) -> list:
-    """
-    Get all customers accessible by the partner.
-    Endpoint: GET /Customers
-    """
-    return await plume_request(
-        user_id=user_id,
-        method="GET",
-        endpoint="Customers",
-        params={"limit": 100}
+    if command == 'nodes':
+        await query.message.delete() # Clean up the button message
+        await nodes(update, context)
+    elif command == 'wifi':
+        await query.message.delete()
+        await wifi(update, context)
+    elif command == 'locations':
+        await query.message.delete()
+        await locations_start(update, context)
+    elif command == 'wan':
+        await query.message.delete()
+        await wan_command(update, context)
+
+# ============ LOCATION SELECTION CONVERSATION ============
+
+async def locations_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    if not is_oauth_token_valid(user_id):
+        await update.message.reply_text("API access is not configured. Please run /setup.")
+        return ConversationHandler.END
+    await update.message.reply_text("Please provide the Customer ID to inspect.")
+    return ASK_CUSTOMER_ID
+
+async def customer_id_provided(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    customer_id = update.message.text.strip()
+    context.user_data['customer_id'] = customer_id
+    user_id = update.effective_user.id
+    await update.message.reply_text(f"Customer `{customer_id}` selected. Fetching locations...")
+    try:
+        locations = await get_locations_for_customer(user_id, customer_id)
+        if not locations:
+            await update.message.reply_text("No locations found for this customer. Try /locations again.")
+            return ConversationHandler.END
+        keyboard = [[InlineKeyboardButton(loc.get('name', 'Unnamed'), callback_data=loc.get('id'))] for loc in locations]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text('Please choose a location:', reply_markup=reply_markup)
+        return SELECT_LOCATION
+    except PlumeAPIError as e:
+        await update.message.reply_text(f"API Error: {e}\nPlease check the Customer ID and try again.")
+        return ConversationHandler.END
+
+async def location_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    location_id = query.data
+    context.user_data['location_id'] = location_id
+    await query.edit_message_text(text=f"Location selected: `{location_id}`\n\nNext, run /status to get a health report.")
+    return ConversationHandler.END
+
+async def locations_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Location selection cancelled.")
+    return ConversationHandler.END
+
+# ============ AUTH SETUP CONVERSATION ============
+
+async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(
+        "Starting OAuth setup...\n\n"
+        "**Step 1 of 2:** Please provide your Plume authorization header.\n"
+        "Send /cancel at any time to abort."
+    )
+    return ASK_AUTH_HEADER
+
+async def ask_partner_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data['auth_header'] = update.message.text
+    await update.message.reply_text("**Step 2 of 2:** Great. Now, please provide your Plume Partner ID.")
+    return ASK_PARTNER_ID
+
+async def confirm_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    partner_id = update.message.text
+    auth_header = context.user_data.get('auth_header')
+    user_id = update.effective_user.id
+    auth_config = {"sso_url": PLUME_SSO_URL, "auth_header": auth_header, "partner_id": partner_id, "plume_api_base": PLUME_API_BASE, "plume_reports_base": PLUME_REPORTS_BASE}
+    set_user_auth(user_id, auth_config)
+    await update.message.reply_text("Testing API connection...")
+    try:
+        new_token_data = await get_oauth_token(auth_config)
+        auth_config.update(new_token_data)
+        await update.message.reply_text("✅ **Success!** API connection is working.\n\nNext, run /locations to begin.")
+        return ConversationHandler.END
+    except (PlumeAPIError, ValueError) as e:
+        await update.message.reply_text(f"❌ **Failed!** {e}\nPlease run /setup again.")
+        return ConversationHandler.END
+
+async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("OAuth setup cancelled.")
+    return ConversationHandler.END
+
+# ============ BOT MAIN ENTRY POINT ============
+
+def main() -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set!")
+
+    application = ApplicationBuilder().token(token).build()
+
+    setup_handler = ConversationHandler(
+        entry_points=[CommandHandler("setup", setup_start)],
+        states={
+            ASK_AUTH_HEADER: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_partner_id)],
+            ASK_PARTNER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_auth)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_setup)],
     )
 
-async def get_locations_for_customer(user_id: int, customer_id: str) -> list:
-    """
-    Get all locations for a specific customer.
-    Endpoint: GET /Customers/{customerId}/locations
-    """
-    return await plume_request(
-        user_id=user_id,
-        method="GET",
-        endpoint=f"Customers/{customer_id}/locations",
-        params={"limit": 100}
+    locations_handler = ConversationHandler(
+        entry_points=[CommandHandler("locations", locations_start)],
+        states={
+            ASK_CUSTOMER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_id_provided)],
+            SELECT_LOCATION: [CallbackQueryHandler(location_selected, pattern='^((?!nav_).)*$')], # Avoid conflict with nav handler
+        },
+        fallbacks=[CommandHandler("cancel", locations_cancel)],
     )
 
-async def get_nodes_in_location(user_id: int, customer_id: str, location_id: str) -> list:
-    """Fetches all nodes (devices) in a specific location for a customer."""
-    response_data = await plume_request(
-        user_id=user_id,
-        method="GET",
-        endpoint=f"Customers/{customer_id}/locations/{location_id}/nodes"
-    )
-    # The actual list of nodes is under the "nodes" key in the response
-    if response_data and isinstance(response_data, dict):
-        return response_data.get("nodes", [])
-    return []
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("nodes", nodes))
+    application.add_handler(CommandHandler("wifi", wifi))
+    application.add_handler(CommandHandler("wan", wan_command))
+    application.add_handler(setup_handler)
+    application.add_handler(locations_handler)
+    application.add_handler(CallbackQueryHandler(navigation_handler, pattern='^nav_'))
 
-async def get_location_status(user_id: int, customer_id: str, location_id: str) -> dict:
-    """Get location health and status information."""
-    return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}")
+    logger.info("Bot is starting...")
+    application.run_polling()
 
-async def get_wifi_networks(user_id: int, customer_id: str, location_id: str) -> list:
-    """Get WiFi networks configured for a location."""
-    return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}/wifiNetworks")
-
-async def get_wan_stats(user_id: int, customer_id: str, location_id: str, period: str = "daily") -> dict:
-    """
-    Get WAN statistics for a specific location.
-    Endpoint: GET /reports/Customers/{customerId}/locations/{locationId}/wanStats?period={period}
-    
-    Args:
-        user_id: The user ID
-        customer_id: The customer ID
-        location_id: The location ID
-        period: The time period for stats (default: 'daily')
-    
-    Returns:
-        Dictionary containing WAN stats data with fifteenMins array
-    """
-    return await plume_request(
-        user_id=user_id,
-        method="GET",
-        endpoint=f"Customers/{customer_id}/locations/{location_id}/wanStats",
-        params={"period": period},
-        use_reports_api=True
-    )
-
-# ============ SERVICE HEALTH ANALYSIS ============
-
-def format_wan_analysis(analysis: dict) -> str:
-    """Formats the WAN analysis dictionary into a user-friendly string."""
-    report_parts = [f"📊 *WAN Link Health*: {analysis['status']}\n"]
-    
-    if analysis["alerts"]:
-        report_parts.append("*Alerts*: ❗")
-        for alert in analysis["alerts"]:
-            report_parts.append(f"  - {alert}")
-    
-    if analysis["warnings"]:
-        report_parts.append("\n*Warnings*: ⚠️")
-        for warning in analysis["warnings"]:
-            report_parts.append(f"  - {warning}")
-
-    if analysis["insights"]:
-        report_parts.append("\n*Insights*: 💡")
-        for insight in analysis["insights"]:
-            report_parts.append(f"  - {insight}")
-
-    latest_timestamp_str = "N/A"
-    if analysis.get('latest_timestamp'):
-        try:
-            dt_obj = datetime.fromisoformat(analysis['latest_timestamp'].replace('Z', '+00:00'))
-            latest_timestamp_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S Z')
-        except ValueError:
-            latest_timestamp_str = analysis['latest_timestamp']
-
-    report_parts.append(f"\n*Latest Data Point*: {latest_timestamp_str}")
-    
-    return "\n".join(report_parts)
-
-
-def analyze_location_health(location_data: dict, nodes: list) -> dict:
-    """
-    Comprehensive health analysis for a location.
-    A location is considered "online" if at least one pod is connected.
-    """
-    health_report = {
-        "online": False,
-        "summary": "",
-        "issues": [],
-        "warnings": [],
-        "pod_details": [],
-        "total_connected_devices": 0,
-    }
-
-    if not isinstance(nodes, list) or not nodes:
-        health_report["summary"] = "🔴 LOCATION IS OFFLINE - No pods found for this location."
-        return health_report
-
-    connected_pods = 0
-    total_connected_devices = 0
-    unhealthy_pods = 0
-
-    for node in nodes:
-        is_connected = node.get("connectionState", "").lower() == "connected"
-        nickname = node.get("defaultName", node.get("id", "Unknown Pod"))
-        health = node.get("health") or {}
-        health_status = health.get("status", "N/A")
-
-        pod_info = {
-            "name": nickname,
-            "connection_state": node.get("connectionState", "unknown"),
-            "health_status": health_status,
-            "backhaul_type": node.get("backhaulType", "unknown"),
-            "alerts": [alert.get("type") for alert in node.get("alerts", [])],
-        }
-        health_report["pod_details"].append(pod_info)
-
-        if is_connected:
-            connected_pods += 1
-            total_connected_devices += node.get("connectedDeviceCount", 0)
-
-            if health_status.lower() in ["fair", "poor"]:
-                unhealthy_pods += 1
-                health_report["warnings"].append(f"Pod '{nickname}' has {health_status} health.")
-            
-            for alert in pod_info["alerts"]:
-                health_report["warnings"].append(f"Pod '{nickname}' has an active alert: {alert}")
-
-        else:
-            health_report["issues"].append(f"Pod '{nickname}' is disconnected.")
-
-    health_report["total_connected_devices"] = total_connected_devices
-    health_report["online"] = connected_pods > 0
-    
-    # --- NEW SUMMARY LOGIC ---
-    if not health_report["online"]:
-        health_report["summary"] = "🔴 LOCATION IS OFFLINE - All pods are disconnected."
-    elif health_report["issues"]:
-        num_issues = len(health_report['issues'])
-        pod_plural = "pod" if num_issues == 1 else "pods"
-        health_report["summary"] = f"🟠 LOCATION ONLINE, but {num_issues} {pod_plural} are disconnected."
-    elif health_report["warnings"]:
-        num_warnings = len(health_report["warnings"])
-        warning_plural = "issue" if num_warnings == 1 else "issues"
-        health_report["summary"] = f"🟡 LOCATION ONLINE, but with {num_warnings} health {warning_plural}."
-    elif location_data.get("serviceLevel", {}).get("status") != "fullService":
-        health_report["summary"] = "🟡 DEGRADED SERVICE"
-        health_report["warnings"].append("Service level is not optimal.")
-    else:
-        health_report["summary"] = "🟢 ALL SYSTEMS OPERATIONAL"
-
-    return health_report
-
-
-def analyze_wan_stats(wan_stats_data: dict) -> dict:
-    """
-    Analyze WAN statistics for anomalies and issues.
-    
-    Args:
-        wan_stats_data: Dictionary containing 'fifteenMins' array with WAN stats
-    
-    Returns:
-        Dictionary with analysis results including alerts and insights
-    """
-    analysis = {
-        "status": "🟢 HEALTHY",
-        "alerts": [],
-        "warnings": [],
-        "insights": [],
-        "avg_rx_mbps": 0,
-        "avg_tx_mbps": 0,
-        "max_rx_mbps": 0,
-        "max_tx_mbps": 0,
-        "null_data_percentage": 0,
-        "data_points_count": 0,
-        "latest_timestamp": None,
-    }
-    
-    if not wan_stats_data or "fifteenMins" not in wan_stats_data:
-        analysis["status"] = "🟡 NO DATA"
-        analysis["alerts"].append("No WAN statistics data available")
-        return analysis
-    
-    data_points = wan_stats_data.get("fifteenMins", [])
-    if not data_points:
-        analysis["status"] = "🟡 NO DATA"
-        analysis["alerts"].append("WAN statistics array is empty")
-        return analysis
-    
-    analysis["data_points_count"] = len(data_points)
-    
-    # Track metrics
-    rx_mbps_values = []
-    tx_mbps_values = []
-    null_data_count = 0
-    
-    for data_point in data_points:
-        timestamp = data_point.get("timestamp")
-        rx_mbytes = data_point.get("rxMbytes")
-        tx_mbytes = data_point.get("txMbytes")
-        rx_max_mbps = data_point.get("rxMaxMbps")
-        tx_max_mbps = data_point.get("txMaxMbps")
-        
-        # Set latest timestamp (first in the list as they're ordered newest first)
-        if not analysis["latest_timestamp"]:
-            analysis["latest_timestamp"] = timestamp
-        
-        # Track null data
-        if rx_mbytes is None or tx_mbytes is None or rx_max_mbps is None or tx_max_mbps is None:
-            null_data_count += 1
-            continue
-        
-        # Collect bandwidth metrics
-        if rx_max_mbps is not None:
-            rx_mbps_values.append(rx_max_mbps)
-        if tx_max_mbps is not None:
-            tx_mbps_values.append(tx_max_mbps)
-    
-    # Calculate statistics
-    if rx_mbps_values:
-        analysis["avg_rx_mbps"] = sum(rx_mbps_values) / len(rx_mbps_values)
-        analysis["max_rx_mbps"] = max(rx_mbps_values)
-    
-    if tx_mbps_values:
-        analysis["avg_tx_mbps"] = sum(tx_mbps_values) / len(tx_mbps_values)
-        analysis["max_tx_mbps"] = max(tx_mbps_values)
-    
-    # Calculate null data percentage
-    if data_points:
-        analysis["null_data_percentage"] = (null_data_count / len(data_points)) * 100
-    
-    # Generate alerts and warnings
-    if analysis["null_data_percentage"] > (WAN_STATS_THRESHOLDS["null_data_threshold"] * 100):
-        analysis["status"] = "🔴 CONNECTION ISSUE"
-        analysis["alerts"].append(
-            f"High percentage of missing data ({analysis['null_data_percentage']:.1f}%). "
-            f"This may indicate connection instability."
-        )
-    
-    if analysis["max_rx_mbps"] > WAN_STATS_THRESHOLDS["high_rx_mbps"]:
-        analysis["warnings"].append(
-            f"High receive bandwidth detected: {analysis['max_rx_mbps']:.2f} Mbps"
-        )
-    
-    if analysis["max_tx_mbps"] > WAN_STATS_THRESHOLDS["high_tx_mbps"]:
-        analysis["warnings"].append(
-            f"High transmit bandwidth detected: {analysis['max_tx_mbps']:.2f} Mbps"
-        )
-    
-    # Determine overall status if no alerts
-    if not analysis["alerts"]:
-        if analysis["warnings"]:
-            analysis["status"] = "🟡 WARNING"
-        else:
-            analysis["status"] = "🟢 HEALTHY"
-    
-    # Add insights
-    if analysis["avg_rx_mbps"] > 0:
-        analysis["insights"].append(f"Average RX: {analysis['avg_rx_mbps']:.2f} Mbps")
-    if analysis["avg_tx_mbps"] > 0:
-        analysis["insights"].append(f"Average TX: {analysis['avg_tx_mbps']:.2f} Mbps")
-    if analysis["data_points_count"] > 0:
-        analysis["insights"].append(f"Data points analyzed: {analysis['data_points_count']}")
-    
-    return analysis
+if __name__ == '__main__':
+    main()
