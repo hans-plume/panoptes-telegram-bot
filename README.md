@@ -1,6 +1,6 @@
 # Panoptes Telegram Bot - Plume Cloud Monitoring
 
-**Version:** 0.9.0  
+**Version:** 0.9.1 
 **Author:** Hans V.
 
 A production-ready Telegram bot for real-time monitoring of Plume Cloud networks, featuring a complete OAuth 2.0 authentication flow and a guided user experience.
