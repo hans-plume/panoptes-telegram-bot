@@ -263,11 +263,13 @@ def analyze_location_health(location_data: dict, nodes: list) -> dict:
         health = node.get("health") or {}
         health_status = health.get("status", "N/A")
 
+        backhaul_raw = node.get("backhaulType", "unknown")
+        backhaul_type = "Mesh" if backhaul_raw.lower() == "wifi" else backhaul_raw
         pod_info = {
             "name": nickname,
             "connection_state": node.get("connectionState", "unknown"),
             "health_status": health_status,
-            "backhaul_type": node.get("backhaulType", "unknown"),
+            "backhaul_type": backhaul_type,
             "alerts": [alert.get("type") for alert in node.get("alerts", [])],
         }
         health_report["pod_details"].append(pod_info)
