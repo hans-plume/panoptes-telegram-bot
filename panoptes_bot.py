@@ -43,6 +43,7 @@ from plume_api_client import (
     format_wan_analysis,
     PlumeAPIError,
     PLUME_SSO_URL,
+    PLUME_API_BASE,
     PLUME_REPORTS_BASE,
 )
 
