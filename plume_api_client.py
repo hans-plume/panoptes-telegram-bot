@@ -203,6 +203,38 @@ async def get_wan_stats(user_id: int, customer_id: str, location_id: str, period
 
 # ============ SERVICE HEALTH ANALYSIS ============
 
+def format_wan_analysis(analysis: dict) -> str:
+    """Formats the WAN analysis dictionary into a user-friendly string."""
+    report_parts = [f"📊 *WAN Link Health*: {analysis['status']}\n"]
+    
+    if analysis["alerts"]:
+        report_parts.append("*Alerts*: ❗")
+        for alert in analysis["alerts"]:
+            report_parts.append(f"  - {alert}")
+    
+    if analysis["warnings"]:
+        report_parts.append("\n*Warnings*: ⚠️")
+        for warning in analysis["warnings"]:
+            report_parts.append(f"  - {warning}")
+
+    if analysis["insights"]:
+        report_parts.append("\n*Insights*: 💡")
+        for insight in analysis["insights"]:
+            report_parts.append(f"  - {insight}")
+
+    latest_timestamp_str = "N/A"
+    if analysis.get('latest_timestamp'):
+        try:
+            dt_obj = datetime.fromisoformat(analysis['latest_timestamp'].replace('Z', '+00:00'))
+            latest_timestamp_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S Z')
+        except ValueError:
+            latest_timestamp_str = analysis['latest_timestamp']
+
+    report_parts.append(f"\n*Latest Data Point*: {latest_timestamp_str}")
+    
+    return "\n".join(report_parts)
+
+
 def analyze_location_health(location_data: dict, nodes: list) -> dict:
     """
     Comprehensive health analysis for a location.
