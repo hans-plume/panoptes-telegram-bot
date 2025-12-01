@@ -154,7 +154,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply_source.reply_markdown(summary)
         
         keyboard = [
-            [InlineKeyboardButton("WAN Analysis", callback_data='nav_wan')],
+            [InlineKeyboardButton("WAN Consumption Report", callback_data='nav_wan')],
             [InlineKeyboardButton("Get Node Details", callback_data='nav_nodes')],
             [InlineKeyboardButton("List WiFi Networks", callback_data='nav_wifi')],
             [InlineKeyboardButton("Change Location", callback_data='nav_locations')],
@@ -229,7 +229,7 @@ async def wan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_source.reply_text("Please select a location with /locations first.")
         return
     
-    await reply_source.reply_text("Fetching WAN statistics for the last 24 hours...")
+    await reply_source.reply_text("Fetching WAN consumption data for the last 24 hours...")
     
     try:
         customer_id = context.user_data['customer_id']
@@ -242,10 +242,10 @@ async def wan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await reply_source.reply_markdown(report_str)
         
     except PlumeAPIError as e:
-        await reply_source.reply_text(f"An API error occurred while fetching WAN stats: {e}")
+        await reply_source.reply_text(f"An API error occurred while fetching WAN consumption data: {e}")
     except Exception as e:
         logger.error(f"An unexpected error in /wan: {e}")
-        await reply_source.reply_text("An unexpected error occurred during WAN analysis.")
+        await reply_source.reply_text("An unexpected error occurred during WAN consumption analysis.")
 
 # ============ NAVIGATION CALLBACK HANDLER ============
 

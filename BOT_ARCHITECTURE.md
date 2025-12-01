@@ -40,8 +40,10 @@ panoptes_bot.py
 │   └── get_wifi_networks()
 │
 ├── Health Analysis
-│   └── analyze_location_health()
-│       └── Generates a rich health report dictionary
+│   ├── analyze_location_health()
+│   │   └── Generates a rich health report dictionary
+│   └── analyze_wan_stats()
+│       └── Generates consumption analytics (peaks, averages, 95th percentile, totals)
 │
 ├── Response Formatters
 │   ├── format_speed_test()
@@ -54,6 +56,7 @@ panoptes_bot.py
 ├── Command Handlers
 │   ├── start() - Welcome message
 │   ├── status() - Main health report
+│   ├── wan_command() - WAN consumption report
 │   ├── nodes() - Detailed pod info
 │   └── wifi() - WiFi SSID list
 │
@@ -86,6 +89,7 @@ Bot sends formatted health report message
     ↓
 Bot sends a *second* message:
 "What would you like to do next?"
+    ├─ [ WAN Consumption Report ] (button)
     ├─ [ Get Node Details ] (button)
     ├─ [ List WiFi Networks ] (button)
     └─ [ Change Location ] (button)

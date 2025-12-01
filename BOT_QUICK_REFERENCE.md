@@ -21,6 +21,7 @@ The bot is designed to guide you. Just follow the suggestions after each command
 *(Use after running `/status`)*
 | Command | Description |
 |---|---|
+| `/wan` | Shows WAN consumption analytics (peaks, averages, data transfer totals). |
 | `/nodes` | Shows technical details for each pod (firmware, IP, etc.). |
 | `/wifi` | Lists all configured WiFi SSIDs and their security settings. |
 
@@ -31,6 +32,7 @@ After you run `/status`, the bot will present you with a menu of options. This i
 
 ```
 What would you like to do next?
+  [ WAN Consumption Report ]-> Runs /wan
   [ Get Node Details ]  -> Runs /nodes
   [ List WiFi Networks ]-> Runs /wifi
   [ Change Location ]   -> Runs /locations
