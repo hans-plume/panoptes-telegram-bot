@@ -14,8 +14,16 @@ from datetime import datetime, timedelta
 # ============ CONFIGURATION & LOGGING ============
 
 PLUME_API_BASE = os.getenv("PLUME_API_BASE", "https://piranha-gamma.prod.us-west-2.aws.plumenet.io/api/")
+PLUME_REPORTS_BASE = os.getenv("PLUME_REPORTS_BASE", "https://piranha-gamma.prod.us-west-2.aws.plumenet.io/reports/")
 PLUME_SSO_URL = "https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token"
 PLUME_TIMEOUT = 10  # seconds
+
+# ============ WAN STATS THRESHOLDS ============
+WAN_STATS_THRESHOLDS = {
+    "high_rx_mbps": 50,  # High receive bandwidth
+    "high_tx_mbps": 50,  # High transmit bandwidth
+    "null_data_threshold": 0.3,  # Alert if > 30% of data points are null
+}
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +42,11 @@ def set_user_auth(user_id: int, auth_config: Dict) -> None:
     user_auth[user_id] = auth_config
     logger.info("Authentication stored for user %s", user_id)
 
+
 def get_user_auth(user_id: int) -> Optional[Dict]:
     """Retrieve user's OAuth configuration."""
     return user_auth.get(user_id)
+
 
 def is_oauth_token_valid(user_id: int) -> bool:
     """Check if user has a valid OAuth token."""
@@ -44,6 +54,7 @@ def is_oauth_token_valid(user_id: int) -> bool:
     if not auth or not auth.get("token_expiry"):
         return False
     return datetime.now() < auth["token_expiry"]
+
 
 async def get_oauth_token(auth_config: Dict) -> Dict:
     """Obtain OAuth token from Plume SSO."""
@@ -82,7 +93,7 @@ async def get_oauth_token(auth_config: Dict) -> Dict:
 
 # ============ PLUME API CLIENT ============
 
-async def plume_request(user_id: int, method: str, endpoint: str, params: Optional[Dict] = None, json_data: Optional[Dict] = None) -> dict:
+async def plume_request(user_id: int, method: str, endpoint: str, params: Optional[Dict] = None, json_data: Optional[Dict] = None, use_reports_api: bool = False) -> dict:
     """Generic function to call the Plume Cloud API."""
     auth_config = get_user_auth(user_id)
     if not auth_config:
@@ -97,7 +108,12 @@ async def plume_request(user_id: int, method: str, endpoint: str, params: Option
             raise PlumeAPIError("Could not refresh token. Please re-authenticate with /setup.") from e
 
     token = auth_config.get("access_token")
-    api_base = auth_config.get("plume_api_base", PLUME_API_BASE)
+    
+    if use_reports_api:
+        api_base = auth_config.get("plume_reports_base", PLUME_REPORTS_BASE)
+    else:
+        api_base = auth_config.get("plume_api_base", PLUME_API_BASE)
+    
     url = f"{api_base.rstrip('/')}/{endpoint.lstrip('/')}"
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
@@ -118,6 +134,7 @@ async def plume_request(user_id: int, method: str, endpoint: str, params: Option
         raise PlumeAPIError("Network error while contacting Plume Cloud.") from e
 
 # ============ BUSINESS LOGIC / PLUME API WRAPPERS ============
+
 async def get_customers(user_id: int) -> list:
     """
     Get all customers accessible by the partner.
@@ -127,7 +144,7 @@ async def get_customers(user_id: int) -> list:
         user_id=user_id,
         method="GET",
         endpoint="Customers",
-        params={"limit": 100} # Get up to 100 customers
+        params={"limit": 100}
     )
 
 async def get_locations_for_customer(user_id: int, customer_id: str) -> list:
@@ -141,6 +158,7 @@ async def get_locations_for_customer(user_id: int, customer_id: str) -> list:
         endpoint=f"Customers/{customer_id}/locations",
         params={"limit": 100}
     )
+
 async def get_nodes_in_location(user_id: int, customer_id: str, location_id: str) -> list:
     """Fetches all nodes (devices) in a specific location for a customer."""
     response_data = await plume_request(
@@ -160,6 +178,28 @@ async def get_location_status(user_id: int, customer_id: str, location_id: str) 
 async def get_wifi_networks(user_id: int, customer_id: str, location_id: str) -> list:
     """Get WiFi networks configured for a location."""
     return await plume_request(user_id, "GET", f"Customers/{customer_id}/locations/{location_id}/wifiNetworks")
+
+async def get_wan_stats(user_id: int, customer_id: str, location_id: str, period: str = "daily") -> dict:
+    """
+    Get WAN statistics for a specific location.
+    Endpoint: GET /reports/Customers/{customerId}/locations/{locationId}/wanStats?period={period}
+    
+    Args:
+        user_id: The user ID
+        customer_id: The customer ID
+        location_id: The location ID
+        period: The time period for stats (default: 'daily')
+    
+    Returns:
+        Dictionary containing WAN stats data with fifteenMins array
+    """
+    return await plume_request(
+        user_id=user_id,
+        method="GET",
+        endpoint=f"Customers/{customer_id}/locations/{location_id}/wanStats",
+        params={"period": period},
+        use_reports_api=True
+    )
 
 # ============ SERVICE HEALTH ANALYSIS ============
 
@@ -235,3 +275,116 @@ def analyze_location_health(location_data: dict, nodes: list) -> dict:
         health_report["summary"] = "🟢 ALL SYSTEMS OPERATIONAL"
 
     return health_report
+
+
+def analyze_wan_stats(wan_stats_data: dict) -> dict:
+    """
+    Analyze WAN statistics for anomalies and issues.
+    
+    Args:
+        wan_stats_data: Dictionary containing 'fifteenMins' array with WAN stats
+    
+    Returns:
+        Dictionary with analysis results including alerts and insights
+    """
+    analysis = {
+        "status": "🟢 HEALTHY",
+        "alerts": [],
+        "warnings": [],
+        "insights": [],
+        "avg_rx_mbps": 0,
+        "avg_tx_mbps": 0,
+        "max_rx_mbps": 0,
+        "max_tx_mbps": 0,
+        "null_data_percentage": 0,
+        "data_points_count": 0,
+        "latest_timestamp": None,
+    }
+    
+    if not wan_stats_data or "fifteenMins" not in wan_stats_data:
+        analysis["status"] = "🟡 NO DATA"
+        analysis["alerts"].append("No WAN statistics data available")
+        return analysis
+    
+    data_points = wan_stats_data.get("fifteenMins", [])
+    if not data_points:
+        analysis["status"] = "🟡 NO DATA"
+        analysis["alerts"].append("WAN statistics array is empty")
+        return analysis
+    
+    analysis["data_points_count"] = len(data_points)
+    
+    # Track metrics
+    rx_mbps_values = []
+    tx_mbps_values = []
+    null_data_count = 0
+    
+    for data_point in data_points:
+        timestamp = data_point.get("timestamp")
+        rx_mbytes = data_point.get("rxMbytes")
+        tx_mbytes = data_point.get("txMbytes")
+        rx_max_mbps = data_point.get("rxMaxMbps")
+        tx_max_mbps = data_point.get("txMaxMbps")
+        
+        # Set latest timestamp (first in the list as they're ordered newest first)
+        if not analysis["latest_timestamp"]:
+            analysis["latest_timestamp"] = timestamp
+        
+        # Track null data
+        if rx_mbytes is None or tx_mbytes is None or rx_max_mbps is None or tx_max_mbps is None:
+            null_data_count += 1
+            continue
+        
+        # Collect bandwidth metrics
+        if rx_max_mbps is not None:
+            rx_mbps_values.append(rx_max_mbps)
+        if tx_max_mbps is not None:
+            tx_mbps_values.append(tx_max_mbps)
+    
+    # Calculate statistics
+    if rx_mbps_values:
+        analysis["avg_rx_mbps"] = sum(rx_mbps_values) / len(rx_mbps_values)
+        analysis["max_rx_mbps"] = max(rx_mbps_values)
+    
+    if tx_mbps_values:
+        analysis["avg_tx_mbps"] = sum(tx_mbps_values) / len(tx_mbps_values)
+        analysis["max_tx_mbps"] = max(tx_mbps_values)
+    
+    # Calculate null data percentage
+    if data_points:
+        analysis["null_data_percentage"] = (null_data_count / len(data_points)) * 100
+    
+    # Generate alerts and warnings
+    if analysis["null_data_percentage"] > (WAN_STATS_THRESHOLDS["null_data_threshold"] * 100):
+        analysis["status"] = "🔴 CONNECTION ISSUE"
+        analysis["alerts"].append(
+            f"High percentage of missing data ({analysis['null_data_percentage']:.1f}%). "
+            f"This may indicate connection instability."
+        )
+    
+    if analysis["max_rx_mbps"] > WAN_STATS_THRESHOLDS["high_rx_mbps"]:
+        analysis["warnings"].append(
+            f"High receive bandwidth detected: {analysis['max_rx_mbps']:.2f} Mbps"
+        )
+    
+    if analysis["max_tx_mbps"] > WAN_STATS_THRESHOLDS["high_tx_mbps"]:
+        analysis["warnings"].append(
+            f"High transmit bandwidth detected: {analysis['max_tx_mbps']:.2f} Mbps"
+        )
+    
+    # Determine overall status if no alerts
+    if not analysis["alerts"]:
+        if analysis["warnings"]:
+            analysis["status"] = "🟡 WARNING"
+        else:
+            analysis["status"] = "🟢 HEALTHY"
+    
+    # Add insights
+    if analysis["avg_rx_mbps"] > 0:
+        analysis["insights"].append(f"Average RX: {analysis['avg_rx_mbps']:.2f} Mbps")
+    if analysis["avg_tx_mbps"] > 0:
+        analysis["insights"].append(f"Average TX: {analysis['avg_tx_mbps']:.2f} Mbps")
+    if analysis["data_points_count"] > 0:
+        analysis["insights"].append(f"Data points analyzed: {analysis['data_points_count']}")
+    
+    return analysis
