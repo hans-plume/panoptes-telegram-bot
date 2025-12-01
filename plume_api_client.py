@@ -427,7 +427,7 @@ def analyze_wan_stats(wan_stats_data: dict) -> dict:
         analysis["peak_rx_mbps"] = peak_rx_mbps
         # Calculate 95th percentile
         sorted_rx = sorted(rx_mbps_values)
-        p95_idx = int(len(sorted_rx) * 0.95)
+        p95_idx = max(0, int(len(sorted_rx) * 0.95))
         analysis["p95_rx_mbps"] = sorted_rx[min(p95_idx, len(sorted_rx) - 1)]
     
     if tx_mbps_values:
@@ -435,7 +435,7 @@ def analyze_wan_stats(wan_stats_data: dict) -> dict:
         analysis["peak_tx_mbps"] = peak_tx_mbps
         # Calculate 95th percentile
         sorted_tx = sorted(tx_mbps_values)
-        p95_idx = int(len(sorted_tx) * 0.95)
+        p95_idx = max(0, int(len(sorted_tx) * 0.95))
         analysis["p95_tx_mbps"] = sorted_tx[min(p95_idx, len(sorted_tx) - 1)]
     
     # Format peak times
@@ -466,16 +466,17 @@ def analyze_wan_stats(wan_stats_data: dict) -> dict:
     # Calculate average across all hours first
     overall_avg = analysis["avg_rx_mbps"]
     
-    # Find hours with above-average traffic
+    # Find hours with above-average traffic (only if we have a meaningful average)
     peak_windows = []
-    for hour, values in sorted(hourly_rx_data.items()):
-        hour_avg = sum(values) / len(values) if values else 0
-        if hour_avg > overall_avg * 1.5:  # 50% above average = high activity
-            peak_windows.append({
-                "time_range": f"{hour} UTC",
-                "description": "High activity" if hour_avg > overall_avg * 2 else "Moderate activity",
-                "avg_rx": hour_avg
-            })
+    if overall_avg > 0:
+        for hour, values in sorted(hourly_rx_data.items()):
+            hour_avg = sum(values) / len(values) if values else 0
+            if hour_avg > overall_avg * 1.5:  # 50% above average = high activity
+                peak_windows.append({
+                    "time_range": f"{hour} UTC",
+                    "description": "High activity" if hour_avg > overall_avg * 2 else "Moderate activity",
+                    "avg_rx": hour_avg
+                })
     
     # Sort by average RX (highest first) and limit to top 3
     peak_windows.sort(key=lambda x: x["avg_rx"], reverse=True)
