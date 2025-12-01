@@ -105,7 +105,8 @@ def format_pod_details(pod_list: list) -> str:
         name = pod.get('name', 'Unknown Pod')
         conn_state = pod.get('connection_state', 'unknown')
         health = pod.get('health_status', 'N/A')
-        backhaul = pod.get('backhaul_type', 'N/A').capitalize()
+        backhaul_raw = pod.get('backhaul_type', 'N/A')
+        backhaul = "Mesh" if backhaul_raw.lower() == "wifi" else backhaul_raw.capitalize()
         if conn_state.lower() == "connected":
             status_icon = "✅" if health.lower() not in ["fair", "poor"] else "🟡"
             status_text = f"Online ({health} Health)" if health != "N/A" else "Online"
