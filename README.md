@@ -17,6 +17,12 @@ A production-ready Telegram bot for real-time monitoring of Plume Cloud networks
     - Detailed per-pod status (connection, health, backhaul type, and alerts).
     - Latest ISP speed test results (download, upload, latency).
     - Total number of connected devices.
+- **WAN Consumption Report (`/wan`)**: Detailed bandwidth consumption analytics including:
+    - Peak capacity usage (RX/TX) with timestamps
+    - Average and 95th percentile bandwidth metrics
+    - Total data transferred (download/upload)
+    - Peak activity window detection
+    - Data quality assessment
 - **Detailed Node Information (`/nodes`)**: Get technical details for each pod, including model, firmware version, MAC, and IP address.
 - **WiFi Network Listing (`/wifi`)**: Display all configured SSIDs for the location, including their security mode.
 - **Location-Centric Workflow**: A dedicated conversation (`/locations`) to select a customer and location, which is then remembered for subsequent commands.
@@ -39,6 +45,7 @@ A production-ready Telegram bot for real-time monitoring of Plume Cloud networks
 | Command | Description |
 |---|---|
 | `/status` | Displays the main, enhanced health report for the selected location and suggests next steps. |
+| `/wan` | Shows WAN consumption analytics including peak usage, averages, and data transfer totals. |
 | `/nodes` | Shows detailed technical information for every pod in the location. |
 | `/wifi` | Lists all configured WiFi SSIDs and their security settings for the location. |
 

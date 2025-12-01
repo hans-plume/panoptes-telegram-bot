@@ -18,12 +18,7 @@ PLUME_REPORTS_BASE = os.getenv("PLUME_REPORTS_BASE", "https://piranha-gamma.prod
 PLUME_SSO_URL = "https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token"
 PLUME_TIMEOUT = 10  # seconds
 
-# ============ WAN STATS THRESHOLDS ============
-WAN_STATS_THRESHOLDS = {
-    "high_rx_mbps": 50,  # High receive bandwidth
-    "high_tx_mbps": 50,  # High transmit bandwidth
-    "null_data_threshold": 0.3,  # Alert if > 30% of data points are null
-}
+
 
 logger = logging.getLogger(__name__)
 
@@ -204,33 +199,55 @@ async def get_wan_stats(user_id: int, customer_id: str, location_id: str, period
 # ============ SERVICE HEALTH ANALYSIS ============
 
 def format_wan_analysis(analysis: dict) -> str:
-    """Formats the WAN analysis dictionary into a user-friendly string."""
-    report_parts = [f"📊 *WAN Link Health*: {analysis['status']}\n"]
+    """Formats the WAN consumption analysis dictionary into a user-friendly report."""
+    report_parts = ["📊 *WAN Link Consumption Report (Last 24 Hours)*\n"]
     
-    if analysis["alerts"]:
-        report_parts.append("*Alerts*: ❗")
-        for alert in analysis["alerts"]:
-            report_parts.append(f"  - {alert}")
+    # Peak Capacity Section
+    peak_rx = analysis.get("peak_rx_mbps", 0)
+    peak_tx = analysis.get("peak_tx_mbps", 0)
+    peak_rx_time = analysis.get("peak_rx_time", "N/A")
+    peak_tx_time = analysis.get("peak_tx_time", "N/A")
     
-    if analysis["warnings"]:
-        report_parts.append("\n*Warnings*: ⚠️")
-        for warning in analysis["warnings"]:
-            report_parts.append(f"  - {warning}")
-
-    if analysis["insights"]:
-        report_parts.append("\n*Insights*: 💡")
-        for insight in analysis["insights"]:
-            report_parts.append(f"  - {insight}")
-
-    latest_timestamp_str = "N/A"
-    if analysis.get('latest_timestamp'):
-        try:
-            dt_obj = datetime.fromisoformat(analysis['latest_timestamp'].replace('Z', '+00:00'))
-            latest_timestamp_str = dt_obj.strftime('%Y-%m-%d %H:%M:%S Z')
-        except ValueError:
-            latest_timestamp_str = analysis['latest_timestamp']
-
-    report_parts.append(f"\n*Latest Data Point*: {latest_timestamp_str}")
+    report_parts.append(f"🔴 *Peak Capacity*: {peak_rx:.2f} Mbps (RX) at {peak_rx_time}")
+    report_parts.append(f"  - Transmit Peak: {peak_tx:.2f} Mbps at {peak_tx_time}")
+    
+    # Average Usage Section
+    avg_rx = analysis.get("avg_rx_mbps", 0)
+    avg_tx = analysis.get("avg_tx_mbps", 0)
+    report_parts.append("\n📈 *Average Usage*")
+    report_parts.append(f"  - RX: {avg_rx:.2f} Mbps")
+    report_parts.append(f"  - TX: {avg_tx:.2f} Mbps")
+    
+    # 95th Percentile Section
+    p95_rx = analysis.get("p95_rx_mbps", 0)
+    p95_tx = analysis.get("p95_tx_mbps", 0)
+    report_parts.append("\n📊 *95th Percentile (Capacity Planning)*")
+    report_parts.append(f"  - RX: {p95_rx:.2f} Mbps")
+    report_parts.append(f"  - TX: {p95_tx:.2f} Mbps")
+    
+    # Total Data Transferred Section
+    total_rx_mb = analysis.get("total_rx_mbytes", 0)
+    total_tx_mb = analysis.get("total_tx_mbytes", 0)
+    total_rx_gb = total_rx_mb / 1024
+    total_tx_gb = total_tx_mb / 1024
+    report_parts.append("\n💾 *Total Data Transferred*")
+    report_parts.append(f"  - Download: {total_rx_mb:,.0f} MB ({total_rx_gb:.1f} GB)")
+    report_parts.append(f"  - Upload: {total_tx_mb:,.0f} MB ({total_tx_gb:.1f} GB)")
+    
+    # Peak Activity Windows Section
+    peak_windows = analysis.get("peak_activity_windows", [])
+    if peak_windows:
+        report_parts.append("\n⏰ *Peak Activity Windows*")
+        for window in peak_windows:
+            report_parts.append(f"  - {window['time_range']}: {window['description']} (avg {window['avg_rx']:.1f} Mbps RX)")
+    
+    # Data Quality Section
+    valid_data_pct = analysis.get("valid_data_percentage", 0)
+    report_parts.append(f"\n📊 *Data Quality*: {valid_data_pct:.1f}% valid data points")
+    
+    # Data Points Info
+    data_points = analysis.get("data_points_count", 0)
+    report_parts.append(f"📁 *Data Points Analyzed*: {data_points}")
     
     return "\n".join(report_parts)
 
@@ -313,45 +330,55 @@ def analyze_location_health(location_data: dict, nodes: list) -> dict:
 
 def analyze_wan_stats(wan_stats_data: dict) -> dict:
     """
-    Analyze WAN statistics for anomalies and issues.
+    Analyze WAN statistics to generate consumption-focused metrics.
     
     Args:
         wan_stats_data: Dictionary containing 'fifteenMins' array with WAN stats
     
     Returns:
-        Dictionary with analysis results including alerts and insights
+        Dictionary with consumption analytics including peaks, averages,
+        95th percentiles, total data transferred, and peak activity windows
     """
     analysis = {
-        "status": "🟢 HEALTHY",
-        "alerts": [],
-        "warnings": [],
-        "insights": [],
+        "peak_rx_mbps": 0,
+        "peak_tx_mbps": 0,
+        "peak_rx_time": "N/A",
+        "peak_tx_time": "N/A",
         "avg_rx_mbps": 0,
         "avg_tx_mbps": 0,
-        "max_rx_mbps": 0,
-        "max_tx_mbps": 0,
-        "null_data_percentage": 0,
+        "p95_rx_mbps": 0,
+        "p95_tx_mbps": 0,
+        "total_rx_mbytes": 0,
+        "total_tx_mbytes": 0,
+        "valid_data_percentage": 0,
         "data_points_count": 0,
-        "latest_timestamp": None,
+        "peak_activity_windows": [],
     }
     
     if not wan_stats_data or "fifteenMins" not in wan_stats_data:
-        analysis["status"] = "🟡 NO DATA"
-        analysis["alerts"].append("No WAN statistics data available")
         return analysis
     
     data_points = wan_stats_data.get("fifteenMins", [])
     if not data_points:
-        analysis["status"] = "🟡 NO DATA"
-        analysis["alerts"].append("WAN statistics array is empty")
         return analysis
     
     analysis["data_points_count"] = len(data_points)
     
-    # Track metrics
+    # Collect metrics from data points
     rx_mbps_values = []
     tx_mbps_values = []
     null_data_count = 0
+    total_rx_mbytes = 0
+    total_tx_mbytes = 0
+    
+    # Track peak times
+    peak_rx_mbps = 0
+    peak_tx_mbps = 0
+    peak_rx_timestamp = None
+    peak_tx_timestamp = None
+    
+    # For activity window detection, store values with timestamps
+    hourly_rx_data = {}  # hour -> list of rx values
     
     for data_point in data_points:
         timestamp = data_point.get("timestamp")
@@ -360,65 +387,98 @@ def analyze_wan_stats(wan_stats_data: dict) -> dict:
         rx_max_mbps = data_point.get("rxMaxMbps")
         tx_max_mbps = data_point.get("txMaxMbps")
         
-        # Set latest timestamp (first in the list as they're ordered newest first)
-        if not analysis["latest_timestamp"]:
-            analysis["latest_timestamp"] = timestamp
-        
         # Track null data
         if rx_mbytes is None or tx_mbytes is None or rx_max_mbps is None or tx_max_mbps is None:
             null_data_count += 1
             continue
         
+        # Accumulate total data transferred
+        total_rx_mbytes += rx_mbytes
+        total_tx_mbytes += tx_mbytes
+        
         # Collect bandwidth metrics
-        if rx_max_mbps is not None:
-            rx_mbps_values.append(rx_max_mbps)
-        if tx_max_mbps is not None:
-            tx_mbps_values.append(tx_max_mbps)
+        rx_mbps_values.append(rx_max_mbps)
+        tx_mbps_values.append(tx_max_mbps)
+        
+        # Track peak RX
+        if rx_max_mbps > peak_rx_mbps:
+            peak_rx_mbps = rx_max_mbps
+            peak_rx_timestamp = timestamp
+        
+        # Track peak TX
+        if tx_max_mbps > peak_tx_mbps:
+            peak_tx_mbps = tx_max_mbps
+            peak_tx_timestamp = timestamp
+        
+        # Aggregate hourly data for activity windows
+        if timestamp:
+            try:
+                dt_obj = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                hour_key = dt_obj.strftime('%H:00')
+                if hour_key not in hourly_rx_data:
+                    hourly_rx_data[hour_key] = []
+                hourly_rx_data[hour_key].append(rx_max_mbps)
+            except (ValueError, AttributeError):
+                pass
     
     # Calculate statistics
     if rx_mbps_values:
         analysis["avg_rx_mbps"] = sum(rx_mbps_values) / len(rx_mbps_values)
-        analysis["max_rx_mbps"] = max(rx_mbps_values)
+        analysis["peak_rx_mbps"] = peak_rx_mbps
+        # Calculate 95th percentile
+        sorted_rx = sorted(rx_mbps_values)
+        p95_idx = int(len(sorted_rx) * 0.95)
+        analysis["p95_rx_mbps"] = sorted_rx[min(p95_idx, len(sorted_rx) - 1)]
     
     if tx_mbps_values:
         analysis["avg_tx_mbps"] = sum(tx_mbps_values) / len(tx_mbps_values)
-        analysis["max_tx_mbps"] = max(tx_mbps_values)
+        analysis["peak_tx_mbps"] = peak_tx_mbps
+        # Calculate 95th percentile
+        sorted_tx = sorted(tx_mbps_values)
+        p95_idx = int(len(sorted_tx) * 0.95)
+        analysis["p95_tx_mbps"] = sorted_tx[min(p95_idx, len(sorted_tx) - 1)]
     
-    # Calculate null data percentage
+    # Format peak times
+    if peak_rx_timestamp:
+        try:
+            dt_obj = datetime.fromisoformat(peak_rx_timestamp.replace('Z', '+00:00'))
+            analysis["peak_rx_time"] = dt_obj.strftime('%H:%M UTC')
+        except (ValueError, AttributeError):
+            analysis["peak_rx_time"] = "N/A"
+    
+    if peak_tx_timestamp:
+        try:
+            dt_obj = datetime.fromisoformat(peak_tx_timestamp.replace('Z', '+00:00'))
+            analysis["peak_tx_time"] = dt_obj.strftime('%H:%M UTC')
+        except (ValueError, AttributeError):
+            analysis["peak_tx_time"] = "N/A"
+    
+    # Total data transferred
+    analysis["total_rx_mbytes"] = total_rx_mbytes
+    analysis["total_tx_mbytes"] = total_tx_mbytes
+    
+    # Calculate valid data percentage
     if data_points:
-        analysis["null_data_percentage"] = (null_data_count / len(data_points)) * 100
+        valid_count = len(data_points) - null_data_count
+        analysis["valid_data_percentage"] = (valid_count / len(data_points)) * 100
     
-    # Generate alerts and warnings
-    if analysis["null_data_percentage"] > (WAN_STATS_THRESHOLDS["null_data_threshold"] * 100):
-        analysis["status"] = "🔴 CONNECTION ISSUE"
-        analysis["alerts"].append(
-            f"High percentage of missing data ({analysis['null_data_percentage']:.1f}%). "
-            f"This may indicate connection instability."
-        )
+    # Detect peak activity windows
+    # Calculate average across all hours first
+    overall_avg = analysis["avg_rx_mbps"]
     
-    if analysis["max_rx_mbps"] > WAN_STATS_THRESHOLDS["high_rx_mbps"]:
-        analysis["warnings"].append(
-            f"High receive bandwidth detected: {analysis['max_rx_mbps']:.2f} Mbps"
-        )
+    # Find hours with above-average traffic
+    peak_windows = []
+    for hour, values in sorted(hourly_rx_data.items()):
+        hour_avg = sum(values) / len(values) if values else 0
+        if hour_avg > overall_avg * 1.5:  # 50% above average = high activity
+            peak_windows.append({
+                "time_range": f"{hour} UTC",
+                "description": "High activity" if hour_avg > overall_avg * 2 else "Moderate activity",
+                "avg_rx": hour_avg
+            })
     
-    if analysis["max_tx_mbps"] > WAN_STATS_THRESHOLDS["high_tx_mbps"]:
-        analysis["warnings"].append(
-            f"High transmit bandwidth detected: {analysis['max_tx_mbps']:.2f} Mbps"
-        )
-    
-    # Determine overall status if no alerts
-    if not analysis["alerts"]:
-        if analysis["warnings"]:
-            analysis["status"] = "🟡 WARNING"
-        else:
-            analysis["status"] = "🟢 HEALTHY"
-    
-    # Add insights
-    if analysis["avg_rx_mbps"] > 0:
-        analysis["insights"].append(f"Average RX: {analysis['avg_rx_mbps']:.2f} Mbps")
-    if analysis["avg_tx_mbps"] > 0:
-        analysis["insights"].append(f"Average TX: {analysis['avg_tx_mbps']:.2f} Mbps")
-    if analysis["data_points_count"] > 0:
-        analysis["insights"].append(f"Data points analyzed: {analysis['data_points_count']}")
+    # Sort by average RX (highest first) and limit to top 3
+    peak_windows.sort(key=lambda x: x["avg_rx"], reverse=True)
+    analysis["peak_activity_windows"] = peak_windows[:3]
     
     return analysis

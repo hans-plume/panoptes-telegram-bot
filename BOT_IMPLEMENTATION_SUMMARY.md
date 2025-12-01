@@ -24,6 +24,7 @@ The main status command is now a rich dashboard, showing:
 
 -   **/nodes**: Provides a technical breakdown of each pod (Model, Firmware, MAC, IP).
 -   **/wifi**: Lists all configured SSIDs and their security modes.
+-   **/wan**: Displays comprehensive WAN consumption analytics including peak capacity, averages, 95th percentile metrics, total data transferred, and peak activity windows.
 
 ### 4. Full OAuth 2.0 Integration
 
@@ -64,6 +65,7 @@ The main status command is now a rich dashboard, showing:
 | Command | Description |
 |---|---|
 | `/status` | The main dashboard. Shows a full health report and suggests next actions. |
+| `/wan` | WAN consumption analytics with peaks, averages, and data transfer totals. |
 | `/nodes` | Lists technical details for each pod (firmware, IP, etc.). |
 | `/wifi` | Lists all configured SSIDs and their security settings. |
 ---
