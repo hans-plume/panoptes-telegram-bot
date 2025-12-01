@@ -17,7 +17,7 @@ import json
 from typing import Dict
 from datetime import datetime
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -53,38 +53,30 @@ logger = logging.getLogger(__name__)
 
 # ============ CONVERSATION STATES ============
 (ASK_AUTH_HEADER, ASK_PARTNER_ID) = range(2)
-(ASK_CUSTOMER_ID, SELECT_LOCATION) = range(2) 
+(ASK_CUSTOMER_ID, SELECT_LOCATION) = range(2)
 
 # ============ ERROR HANDLER ============
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log the error and send a technical message to the user."""
+    """Log the error and send a notification."""
     logger.error("Exception while handling an update:", exc_info=context.error)
-
-    # Traceback preparation
-    tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
-    tb_string = "".join(tb_list)
-
-    # Log the full traceback
+    tb_string = "".join(traceback.format_exception(None, context.error, context.error.__traceback__))
     logger.error(tb_string)
 
-    # Format the message for the user
-    update_str = update.to_dict() if isinstance(update, Update) else str(update)
-    message = (
-        "An exception was raised while handling an update\n"
-        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}</pre>\n"
-        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n"
-        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n"
-        f"<pre>{html.escape(tb_string)}</pre>"
-    )
-
-    # Send the error message to the user
-    if update and hasattr(update, 'message'):
-        await update.message.reply_text(
-            "Sorry, a critical error occurred. Please report this to the administrator."
-        )
+    # Try to notify the user
+    try:
+        if isinstance(update, Update) and update.effective_message:
+            await update.effective_message.reply_text(
+                "Sorry, a critical error occurred. The administrator has been notified."
+            )
+    except Exception as e:
+        logger.error(f"Failed to send error message to user: {e}")
 
 # ============ HELPER FUNCTIONS ============
+
+def get_reply_source(update: Update) -> Message:
+    """Determine the correct message object to reply to."""
+    return update.effective_message
 
 def format_speed_test(speed_test_data: dict) -> str:
     if not speed_test_data or speed_test_data.get("status") != "succeeded":
@@ -129,17 +121,19 @@ def format_pod_details(pod_list: list) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
+    reply_source = get_reply_source(update)
     if not is_oauth_token_valid(user.id):
-        await update.message.reply_text(f"Hi {user.first_name}! Welcome. Please run /setup to configure API access.")
+        await reply_source.reply_text(f"Hi {user.first_name}! Welcome. Please run /setup to configure API access.")
     else:
-        await update.message.reply_text(f"Welcome back, {user.first_name}! Run /locations to select a network.")
+        await reply_source.reply_text(f"Welcome back, {user.first_name}! Run /locations to select a network.")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    reply_source = get_reply_source(update)
     user_id = update.effective_user.id
     if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
-        await update.message.reply_text("You haven't selected a location yet. Please run /locations first.")
+        await reply_source.reply_text("You haven't selected a location yet. Please run /locations first.")
         return
-    await update.message.reply_text("Fetching enhanced network status... this may take a moment.")
+    await reply_source.reply_text("Fetching enhanced network status... this may take a moment.")
     try:
         customer_id = context.user_data['customer_id']
         location_id = context.user_data['location_id']
@@ -156,7 +150,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "\n" f"📱 *Total Devices Connected*: {health_report['total_connected_devices']}"
         ]
         summary = "\n".join(summary_parts)
-        await update.message.reply_markdown(summary)
+        await reply_source.reply_markdown(summary)
         
         keyboard = [
             [InlineKeyboardButton("WAN Analysis", callback_data='nav_wan')],
@@ -165,25 +159,25 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             [InlineKeyboardButton("Change Location", callback_data='nav_locations')],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text('What would you like to do next?', reply_markup=reply_markup)
+        await reply_source.reply_text('What would you like to do next?', reply_markup=reply_markup)
 
     except PlumeAPIError as e:
-        await update.message.reply_text(f"An API error occurred: {e}")
+        await reply_source.reply_text(f"An API error occurred: {e}")
     except Exception as e:
         logger.error(f"An unexpected error in /status: {e}")
-        await update.message.reply_text("An unexpected error occurred.")
+        await reply_source.reply_text("An unexpected error occurred.")
 
 async def nodes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays detailed information about each node."""
+    reply_source = get_reply_source(update)
     user_id = update.effective_user.id
     if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
-        await update.message.reply_text("Please select a location with /locations first.")
+        await reply_source.reply_text("Please select a location with /locations first.")
         return
-    await update.message.reply_text("Fetching node details...")
+    await reply_source.reply_text("Fetching node details...")
     try:
         nodes_data = await get_nodes_in_location(user_id, context.user_data['customer_id'], context.user_data['location_id'])
         if not nodes_data:
-            await update.message.reply_text("No nodes found for this location.")
+            await reply_source.reply_text("No nodes found for this location.")
             return
 
         report_parts = ["*Node Details*\n"]
@@ -197,21 +191,21 @@ async def nodes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"  - *MAC*: `{node.get('mac', 'N/A')}`\n"
                 f"  - *IP*: `{node.get('ip', 'N/A')}`"
             )
-        await update.message.reply_markdown("\n".join(report_parts))
+        await reply_source.reply_markdown("\n".join(report_parts))
     except PlumeAPIError as e:
-        await update.message.reply_text(f"An API error occurred: {e}")
+        await reply_source.reply_text(f"An API error occurred: {e}")
 
 async def wifi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Displays WiFi network configuration."""
+    reply_source = get_reply_source(update)
     user_id = update.effective_user.id
     if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
-        await update.message.reply_text("Please select a location with /locations first.")
+        await reply_source.reply_text("Please select a location with /locations first.")
         return
-    await update.message.reply_text("Fetching WiFi networks...")
+    await reply_source.reply_text("Fetching WiFi networks...")
     try:
         wifi_data = await get_wifi_networks(user_id, context.user_data['customer_id'], context.user_data['location_id'])
         if not wifi_data:
-            await update.message.reply_text("No WiFi networks found.")
+            await reply_source.reply_text("No WiFi networks found.")
             return
         
         report_parts = ["*WiFi Network Configuration*\n"]
@@ -223,18 +217,18 @@ async def wifi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 f"• *{ssid}* ({enabled}):\n"
                 f"  - *Security*: {wpa_mode}"
             )
-        await update.message.reply_markdown("\n".join(report_parts))
+        await reply_source.reply_markdown("\n".join(report_parts))
     except PlumeAPIError as e:
-        await update.message.reply_text(f"An API error occurred: {e}")
+        await reply_source.reply_text(f"An API error occurred: {e}")
 
 async def wan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /wan command and provides a WAN health analysis."""
+    reply_source = get_reply_source(update)
     user_id = update.effective_user.id
     if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
-        await update.message.reply_text("Please select a location with /locations first.")
+        await reply_source.reply_text("Please select a location with /locations first.")
         return
     
-    await update.message.reply_text("Fetching WAN statistics for the last 24 hours...")
+    await reply_source.reply_text("Fetching WAN statistics for the last 24 hours...")
     
     try:
         customer_id = context.user_data['customer_id']
@@ -244,13 +238,13 @@ async def wan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         wan_analysis = analyze_wan_stats(wan_stats_data)
         
         report_str = format_wan_analysis(wan_analysis)
-        await update.message.reply_markdown(report_str)
+        await reply_source.reply_markdown(report_str)
         
     except PlumeAPIError as e:
-        await update.message.reply_text(f"An API error occurred while fetching WAN stats: {e}")
+        await reply_source.reply_text(f"An API error occurred while fetching WAN stats: {e}")
     except Exception as e:
         logger.error(f"An unexpected error in /wan: {e}")
-        await update.message.reply_text("An unexpected error occurred during WAN analysis.")
+        await reply_source.reply_text("An unexpected error occurred during WAN analysis.")
 
 # ============ NAVIGATION CALLBACK HANDLER ============
 
@@ -259,50 +253,47 @@ async def navigation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    if not hasattr(update, 'message'):
-        update.message = query.message
+    await query.message.delete()
     
     command = query.data.split('_')[1]
 
     if command == 'nodes':
-        await query.message.delete()
         await nodes(update, context)
     elif command == 'wifi':
-        await query.message.delete()
         await wifi(update, context)
     elif command == 'locations':
-        await query.message.delete()
         await locations_start(update, context)
     elif command == 'wan':
-        await query.message.delete()
         await wan_command(update, context)
 
 # ============ LOCATION SELECTION CONVERSATION ============
 
 async def locations_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    reply_source = get_reply_source(update)
     user_id = update.effective_user.id
     if not is_oauth_token_valid(user_id):
-        await update.message.reply_text("API access is not configured. Please run /setup.")
+        await reply_source.reply_text("API access is not configured. Please run /setup.")
         return ConversationHandler.END
-    await update.message.reply_text("Please provide the Customer ID to inspect.")
+    await reply_source.reply_text("Please provide the Customer ID to inspect.")
     return ASK_CUSTOMER_ID
 
 async def customer_id_provided(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    customer_id = update.message.text.strip()
+    reply_source = get_reply_source(update)
+    customer_id = reply_source.text.strip()
     context.user_data['customer_id'] = customer_id
     user_id = update.effective_user.id
-    await update.message.reply_text(f"Customer `{customer_id}` selected. Fetching locations...")
+    await reply_source.reply_text(f"Customer `{customer_id}` selected. Fetching locations...")
     try:
         locations = await get_locations_for_customer(user_id, customer_id)
         if not locations:
-            await update.message.reply_text("No locations found for this customer. Try /locations again.")
+            await reply_source.reply_text("No locations found for this customer. Try /locations again.")
             return ConversationHandler.END
         keyboard = [[InlineKeyboardButton(loc.get('name', 'Unnamed'), callback_data=loc.get('id'))] for loc in locations]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text('Please choose a location:', reply_markup=reply_markup)
+        await reply_source.reply_text('Please choose a location:', reply_markup=reply_markup)
         return SELECT_LOCATION
     except PlumeAPIError as e:
-        await update.message.reply_text(f"API Error: {e}\nPlease check the Customer ID and try again.")
+        await reply_source.reply_text(f"API Error: {e}\nPlease check the Customer ID and try again.")
         return ConversationHandler.END
 
 async def location_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -314,13 +305,15 @@ async def location_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 async def locations_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Location selection cancelled.")
+    reply_source = get_reply_source(update)
+    await reply_source.reply_text("Location selection cancelled.")
     return ConversationHandler.END
 
 # ============ AUTH SETUP CONVERSATION ============
 
 async def setup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(
+    reply_source = get_reply_source(update)
+    await reply_source.reply_text(
         "Starting OAuth setup...\n\n"
         "**Step 1 of 2:** Please provide your Plume authorization header.\n"
         "Send /cancel at any time to abort."
@@ -333,23 +326,25 @@ async def ask_partner_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ASK_PARTNER_ID
 
 async def confirm_auth(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    partner_id = update.message.text
+    reply_source = get_reply_source(update)
+    partner_id = reply_source.text
     auth_header = context.user_data.get('auth_header')
     user_id = update.effective_user.id
     auth_config = {"sso_url": PLUME_SSO_URL, "auth_header": auth_header, "partner_id": partner_id, "plume_api_base": PLUME_API_BASE, "plume_reports_base": PLUME_REPORTS_BASE}
     set_user_auth(user_id, auth_config)
-    await update.message.reply_text("Testing API connection...")
+    await reply_source.reply_text("Testing API connection...")
     try:
         new_token_data = await get_oauth_token(auth_config)
         auth_config.update(new_token_data)
-        await update.message.reply_text("✅ **Success!** API connection is working.\n\nNext, run /locations to begin.")
+        await reply_source.reply_text("✅ **Success!** API connection is working.\n\nNext, run /locations to begin.")
         return ConversationHandler.END
     except (PlumeAPIError, ValueError) as e:
-        await update.message.reply_text(f"❌ **Failed!** {e}\nPlease run /setup again.")
+        await reply_source.reply_text(f"❌ **Failed!** {e}\nPlease run /setup again.")
         return ConversationHandler.END
 
 async def cancel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("OAuth setup cancelled.")
+    reply_source = get_reply_source(update)
+    await reply_source.reply_text("OAuth setup cancelled.")
     return ConversationHandler.END
 
 # ============ BOT MAIN ENTRY POINT ============
@@ -361,7 +356,6 @@ def main() -> None:
 
     application = ApplicationBuilder().token(token).build()
 
-    # Add the error handler
     application.add_error_handler(error_handler)
 
     setup_handler = ConversationHandler(
