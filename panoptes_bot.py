@@ -11,6 +11,9 @@ License: MIT
 
 import logging
 import os
+import traceback
+import html
+import json
 from typing import Dict
 from datetime import datetime
 
@@ -24,6 +27,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
+from telegram.constants import ParseMode
 
 from plume_api_client import (
     set_user_auth,
@@ -39,7 +43,7 @@ from plume_api_client import (
     format_wan_analysis,
     PlumeAPIError,
     PLUME_SSO_URL,
-    PLUME_API_BASE,
+    PLUME_REPORTS_BASE,
 )
 
 # ============ CONFIGURATION & LOGGING ============
@@ -49,6 +53,35 @@ logger = logging.getLogger(__name__)
 # ============ CONVERSATION STATES ============
 (ASK_AUTH_HEADER, ASK_PARTNER_ID) = range(2)
 (ASK_CUSTOMER_ID, SELECT_LOCATION) = range(2) 
+
+# ============ ERROR HANDLER ============
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a technical message to the user."""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+
+    # Traceback preparation
+    tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
+    tb_string = "".join(tb_list)
+
+    # Log the full traceback
+    logger.error(tb_string)
+
+    # Format the message for the user
+    update_str = update.to_dict() if isinstance(update, Update) else str(update)
+    message = (
+        "An exception was raised while handling an update\n"
+        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}</pre>\n"
+        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n"
+        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n"
+        f"<pre>{html.escape(tb_string)}</pre>"
+    )
+
+    # Send the error message to the user
+    if update and hasattr(update, 'message'):
+        await update.message.reply_text(
+            "Sorry, a critical error occurred. Please report this to the administrator."
+        )
 
 # ============ HELPER FUNCTIONS ============
 
@@ -124,7 +157,6 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         summary = "\n".join(summary_parts)
         await update.message.reply_markdown(summary)
         
-        # Follow-up with suggested commands
         keyboard = [
             [InlineKeyboardButton("WAN Analysis", callback_data='nav_wan')],
             [InlineKeyboardButton("Get Node Details", callback_data='nav_nodes')],
@@ -207,11 +239,9 @@ async def wan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         customer_id = context.user_data['customer_id']
         location_id = context.user_data['location_id']
         
-        # Fetch and analyze WAN statistics
         wan_stats_data = await get_wan_stats(user_id, customer_id, location_id, period="daily")
         wan_analysis = analyze_wan_stats(wan_stats_data)
         
-        # Format and send the report
         report_str = format_wan_analysis(wan_analysis)
         await update.message.reply_markdown(report_str)
         
@@ -228,14 +258,13 @@ async def navigation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    # Ensure update.message exists for command handlers
     if not hasattr(update, 'message'):
         update.message = query.message
     
-    command = query.data.split('_')[1] # e.g., 'nav_nodes' -> 'nodes'
+    command = query.data.split('_')[1]
 
     if command == 'nodes':
-        await query.message.delete() # Clean up the button message
+        await query.message.delete()
         await nodes(update, context)
     elif command == 'wifi':
         await query.message.delete()
@@ -331,6 +360,9 @@ def main() -> None:
 
     application = ApplicationBuilder().token(token).build()
 
+    # Add the error handler
+    application.add_error_handler(error_handler)
+
     setup_handler = ConversationHandler(
         entry_points=[CommandHandler("setup", setup_start)],
         states={
@@ -344,7 +376,7 @@ def main() -> None:
         entry_points=[CommandHandler("locations", locations_start)],
         states={
             ASK_CUSTOMER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_id_provided)],
-            SELECT_LOCATION: [CallbackQueryHandler(location_selected, pattern='^((?!nav_).)*$')], # Avoid conflict with nav handler
+            SELECT_LOCATION: [CallbackQueryHandler(location_selected, pattern='^((?!nav_).)*$')],
         },
         fallbacks=[CommandHandler("cancel", locations_cancel)],
     )
