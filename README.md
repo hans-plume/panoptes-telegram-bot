@@ -47,11 +47,11 @@ A production-ready Telegram bot for real-time monitoring of Plume Cloud networks
 ## Getting Started
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.8+ (or Docker)
 - A Telegram Bot Token
 - Plume Cloud API Credentials (Authorization Header and Partner ID)
 
-### Installation
+### Installation (Standard)
 
 1.  **Clone the repository:**
     ```bash
@@ -76,6 +76,49 @@ Execute the main bot script:
 ```bash
 python -m panoptes_bot
 ```
+
+### Running with Docker
+
+Docker provides a consistent, containerized environment for running the bot.
+
+#### Using Docker Compose (Recommended)
+
+1.  **Build and start the bot:**
+    ```bash
+    docker compose up -d
+    ```
+
+2.  **View logs:**
+    ```bash
+    docker compose logs -f
+    ```
+
+3.  **Stop the bot:**
+    ```bash
+    docker compose down
+    ```
+
+#### Using Docker Directly
+
+1.  **Build the image:**
+    ```bash
+    docker build -t panoptes-telegram-bot .
+    ```
+
+2.  **Run the container:**
+    ```bash
+    docker run -d --name panoptes-bot --env-file .env panoptes-telegram-bot
+    ```
+
+3.  **View logs:**
+    ```bash
+    docker logs -f panoptes-bot
+    ```
+
+4.  **Stop the container:**
+    ```bash
+    docker stop panoptes-bot && docker rm panoptes-bot
+    ```
 
 ### First-Time Use
 
