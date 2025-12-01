@@ -1,0 +1,15 @@
+# Panoptes Telegram Bot - Docker Compose Configuration
+# For local development and deployment
+
+services:
+  panoptes-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: panoptes-telegram-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Optional: Mount .env file for local development
+    # volumes:
+    #   - ./.env:/app/.env:ro
