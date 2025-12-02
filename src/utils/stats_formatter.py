@@ -61,6 +61,24 @@ def get_trend_emoji(trend: str) -> str:
     return trend_map.get(trend, "➡️ Stable")
 
 
+def truncate_text(text: str, max_length: int) -> str:
+    """
+    Truncate text to max length with ellipsis if needed.
+
+    Args:
+        text: Text to truncate.
+        max_length: Maximum length of the result.
+
+    Returns:
+        Truncated text with ellipsis if needed.
+    """
+    if len(text) <= max_length:
+        return text
+    if max_length <= 3:
+        return text[:max_length]
+    return text[: max_length - 1] + "…"
+
+
 def format_status_box(stats_data: Dict[str, Any]) -> str:
     """
     Format the status summary box.
@@ -79,12 +97,18 @@ def format_status_box(stats_data: Dict[str, Any]) -> str:
     status_emoji = get_status_emoji(status_label)
     trend_display = get_trend_emoji(trend)
 
+    # Truncate values to fit in box layout
+    status_display = truncate_text(status_label, 15)
+    time_display = truncate_text(time_range_label, 22)
+    trend_truncated = truncate_text(trend_display, 14)
+    incident_display = str(incidents)[:13]
+
     lines = [
         "┌──────────────────────────────┐",
-        f"│  {status_emoji} Status: {status_label:<15} │",
-        f"│  ⏱️  {time_range_label:<22} │",
-        f"│  📈 Trend: {trend_display:<14} │",
-        f"│  🔔 Incidents: {incidents:<13} │",
+        f"│  {status_emoji} Status: {status_display:<15} │",
+        f"│  ⏱️  {time_display:<22} │",
+        f"│  📈 Trend: {trend_truncated:<14} │",
+        f"│  🔔 Incidents: {incident_display:<13} │",
         "└──────────────────────────────┘",
     ]
     return "\n".join(lines)
@@ -139,10 +163,13 @@ def format_online_stats_message(
     uptime = stats_data.get("uptime_percentage", 0.0)
     progress_bar = format_progress_bar(uptime)
 
+    # Truncate location name to fit in header box
+    display_name = truncate_text(location_name, 22)
+
     # Header
     header = (
         "╭──────────────────────────────╮\n"
-        f"│   🏢 {location_name[:22]:<22} │\n"
+        f"│   🏢 {display_name:<22} │\n"
         "│   Connection Status Report   │\n"
         "╰──────────────────────────────╯"
     )

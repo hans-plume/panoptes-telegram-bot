@@ -19,6 +19,7 @@ from src.utils.stats_formatter import (
     format_status_box,
     format_breakdown,
     format_online_stats_message,
+    truncate_text,
 )
 
 
@@ -176,6 +177,24 @@ class TestStatsProcessor:
 
 class TestStatsFormatter:
     """Tests for stats formatter functions."""
+
+    def test_truncate_text_short(self):
+        """Test truncate text with text shorter than max."""
+        assert truncate_text("Hello", 10) == "Hello"
+
+    def test_truncate_text_exact(self):
+        """Test truncate text with text exactly at max."""
+        assert truncate_text("Hello", 5) == "Hello"
+
+    def test_truncate_text_long(self):
+        """Test truncate text with text longer than max."""
+        result = truncate_text("Hello World", 8)
+        assert result == "Hello W…"
+        assert len(result) == 8
+
+    def test_truncate_text_very_short_max(self):
+        """Test truncate text with very short max length."""
+        assert truncate_text("Hello", 3) == "Hel"
 
     def test_format_progress_bar_full(self):
         """Test progress bar at 100%."""

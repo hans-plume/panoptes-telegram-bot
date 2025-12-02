@@ -113,8 +113,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         try:
             location_data = await get_location_status(user_id, customer_id, location_id)
             location_name = location_data.get("name", location_id)
-        except PlumeAPIError:
-            pass  # Use location_id as fallback
+        except PlumeAPIError as e:
+            logger.debug("Could not fetch location name, using ID as fallback: %s", e)
 
         # Default to 7 days view
         message = await fetch_and_format_stats(
