@@ -6,8 +6,15 @@ __pycache__/
 venv/
 env/
 .venv/
+*.pyc
+*.pyo
 
 # IDE and OS files
 .idea/
 .vscode/
 .DS_Store 
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
