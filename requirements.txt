@@ -9,3 +9,6 @@ pytz
 
 # For loading environment variables from .env files
 python-dotenv
+
+# For data validation and models
+pydantic>=2.0.0

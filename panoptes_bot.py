@@ -47,6 +47,8 @@ from plume_api_client import (
     PLUME_REPORTS_BASE,
 )
 
+from src.handlers.location_stats import stats_command, stats_time_range_callback
+
 # ============ CONFIGURATION & LOGGING ============
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -382,9 +384,11 @@ def main() -> None:
     application.add_handler(CommandHandler("nodes", nodes))
     application.add_handler(CommandHandler("wifi", wifi))
     application.add_handler(CommandHandler("wan", wan_command))
+    application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(setup_handler)
     application.add_handler(locations_handler)
     application.add_handler(CallbackQueryHandler(navigation_handler, pattern='^nav_'))
+    application.add_handler(CallbackQueryHandler(stats_time_range_callback, pattern='^stats_'))
 
     logger.info("Bot is starting...")
     application.run_polling()
