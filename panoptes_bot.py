@@ -157,6 +157,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
         keyboard = [
             [InlineKeyboardButton("WAN Consumption Report", callback_data='nav_wan')],
+            [InlineKeyboardButton("Online Stats Report", callback_data='nav_stats')],
             [InlineKeyboardButton("Get Node Details", callback_data='nav_nodes')],
             [InlineKeyboardButton("List WiFi Networks", callback_data='nav_wifi')],
             [InlineKeyboardButton("Change Location", callback_data='nav_locations')],
@@ -268,6 +269,8 @@ async def navigation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await locations_start(update, context)
     elif command == 'wan':
         await wan_command(update, context)
+    elif command == 'stats':
+        await stats_command(update, context)
 
 # ============ LOCATION SELECTION CONVERSATION ============
 
