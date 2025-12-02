@@ -149,7 +149,7 @@ def format_online_stats_message(
     return "\n".join(message_parts)
 
 
-def get_time_range_keyboard_text(selected: str) -> str:
+def get_time_range_keyboard_text(selected: str) -> list:
     """
     Get keyboard button text with selection indicator.
 
@@ -157,7 +157,7 @@ def get_time_range_keyboard_text(selected: str) -> str:
         selected: Currently selected time range ('3h', '24h', '7d').
 
     Returns:
-        Tuple of button texts for 3h, 24h, 7d buttons.
+        List of button texts for 3h, 24h, 7d buttons.
     """
     buttons = {
         "3h": "3️⃣ Hrs",
