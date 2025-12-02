@@ -1,87 +1,137 @@
-# Panoptes Telegram Bot
+# Panoptes Telegram Bot - Plume Cloud Monitoring
 
-Real-time Plume Cloud network monitoring via Telegram with OAuth 2.0 authentication.
+**Version:** 0.9.1 
+**Author:** Hans V.
+
+A production-ready Telegram bot for real-time monitoring of Plume Cloud networks, featuring a complete OAuth 2.0 authentication flow and a guided user experience.
+
+---
 
 ## Features
 
-- 🔐 **OAuth 2.0 Authentication** - Secure Client Credentials flow
-- 📊 **Network Monitoring** - Real-time health, nodes, devices, QoE stats
-- 📱 **Device Tracking** - Connected devices and WiFi pod status
-- 🟢 **Health Indicators** - Visual status with emoji (🟢🟡🟠🔴)
-- 🔄 **Auto Token Refresh** - Automatic token renewal 60 seconds before expiry
-- 📡 **Multiple Endpoints** - Location, devices, service health, QoE, connectivity
-- ⚠️ **Error Handling** - Graceful error messages and automatic recovery
+- **Guided User Workflow**: The bot intelligently suggests the next logical command, creating a seamless user experience from setup to detailed analysis.
+- **Full OAuth 2.0 Authentication**: A secure, multi-step conversation handler (`/setup`) for one-time API credential configuration.
+- **Automatic Token Management**: Automatically obtains and refreshes OAuth tokens, ensuring uninterrupted API access.
+- **Enhanced Network Status (`/status`)**: A comprehensive overview of location health, including:
+    - Overall summary (Online, Offline, Degraded Service).
+    - Detailed per-pod status (connection, health, backhaul type, and alerts).
+    - Latest ISP speed test results (download, upload, latency).
+    - Total number of connected devices.
+- **WAN Consumption Report (`/wan`)**: Detailed bandwidth consumption analytics including:
+    - Peak capacity usage (RX/TX) with timestamps
+    - Average and 95th percentile bandwidth metrics
+    - Total data transferred (download/upload)
+    - Peak activity window detection
+    - Data quality assessment
+- **Detailed Node Information (`/nodes`)**: Get technical details for each pod, including model, firmware version, MAC, and IP address.
+- **WiFi Network Listing (`/wifi`)**: Display all configured SSIDs for the location, including their security mode.
+- **Location-Centric Workflow**: A dedicated conversation (`/locations`) to select a customer and location, which is then remembered for subsequent commands.
+- **Modular and Asynchronous Codebase**: Built with `python-telegram-bot` and `httpx` for a scalable, high-performance, and maintainable architecture.
 
-## Quick Start
+---
 
-### Prerequisites
+## Command Reference
 
-- Python 3.8+
-- Telegram Bot (get from @BotFather on Telegram)
-- Plume Cloud API credentials
+### Setup and Navigation
+| Command | Description |
+|---|---|
+| `/start` | Initializes the bot. Guides to `/setup` or `/locations`. |
+| `/setup` | Starts the guided, one-time OAuth 2.0 setup conversation. |
+| `/locations`| Starts the conversation to select a customer and location to monitor. |
 
-### Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/hans-plume/panoptes-telegram-bot.git
-cd panoptes-telegram-bot
-```
-
-2. Create virtual environment:
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Set up environment variables:
-```bash
-cp .env.example .env
-echo "TELEGRAM_BOT_TOKEN=your_token_here" >> .env
-```
-
-5. Run the bot:
-```bash
-python panoptes_bot.py
-```
-
-## Commands
+### Monitoring Commands
+*Note: A location must be selected with `/locations` before using these commands.*
 
 | Command | Description |
-|---------|-------------|
-| `/start` | Welcome & command list |
-| `/help` | Show help message |
-| `/auth` | OAuth 2.0 setup (4 steps) |
-| `/health` | Network health check |
-| `/nodes` | List connected nodes |
-| `/devices` | List connected devices |
-| `/wifi` | WiFi pod status |
-| `/status` | Full network report |
+|---|---|
+| `/status` | Displays the main, enhanced health report for the selected location and suggests next steps. |
+| `/wan` | Shows WAN consumption analytics including peak usage, averages, and data transfer totals. |
+| `/nodes` | Shows detailed technical information for every pod in the location. |
+| `/wifi` | Lists all configured WiFi SSIDs and their security settings for the location. |
 
-## OAuth Setup
+---
 
-When you run `/auth`, the bot will guide you through 4 steps:
+## Getting Started
 
-1. **SSO URL** - OAuth endpoint (e.g., `https://external.sso.plume.com/oauth2/{auth-id}/v1/token`)
-2. **Authorization Header** - Bearer token format
-3. **Partner ID** - Numeric ID
-4. **API Base URL** - API endpoint (e.g., `https://api.plume.com/cloud/v1`)
+### Prerequisites
+- Python 3.8+ (or Docker)
+- A Telegram Bot Token
+- Plume Cloud API Credentials (Authorization Header and Partner ID)
 
-## Architecture
+### Installation (Standard)
 
-- **plume_api_client.py** - Pure API layer (OAuth, endpoints, health analysis)
-- **panoptes_bot.py** - Telegram handlers (commands, formatters, conversation)
-- **__init__.py** - Package interface
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/hans-plume/panoptes-telegram-bot.git
+    cd panoptes-telegram-bot
+    ```
 
-## Documentation
+2.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-See `DOCUMENTATION_INDEX.md` for complete guide navigation.
+3.  **Set up environment variables:**
+    Create a `.env` file in the root directory and add your Telegram Bot token:
+    ```
+    TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234567890"
+    ```
 
-## License
+### Running the Bot
 
-MIT
+Execute the main bot script:
+```bash
+python -m panoptes_bot
+```
+
+### Running with Docker
+
+Docker provides a consistent, containerized environment for running the bot.
+
+#### Using Docker Compose (Recommended)
+
+1.  **Build and start the bot:**
+    ```bash
+    docker compose up -d
+    ```
+
+2.  **View logs:**
+    ```bash
+    docker compose logs -f
+    ```
+
+3.  **Stop the bot:**
+    ```bash
+    docker compose down
+    ```
+
+#### Using Docker Directly
+
+1.  **Build the image:**
+    ```bash
+    docker build -t panoptes-telegram-bot .
+    ```
+
+2.  **Run the container:**
+    ```bash
+    docker run -d --name panoptes-bot --env-file .env panoptes-telegram-bot
+    ```
+
+3.  **View logs:**
+    ```bash
+    docker logs -f panoptes-bot
+    ```
+
+4.  **Stop the container:**
+    ```bash
+    docker stop panoptes-bot && docker rm panoptes-bot
+    ```
+
+### First-Time Use
+
+1.  **Start a chat** with your bot in Telegram and send `/start`.
+2.  The bot will prompt you to run `/setup`.
+3.  Follow the on-screen instructions to provide your Plume API credentials (Authorization Header and Partner ID).
+4.  Once setup is complete, the bot will suggest you run `/locations`.
+5.  Use `/locations` to select the network you wish to monitor.
+6.  Finally, run `/status` to see your first network health report. The bot will then guide you to other commands.

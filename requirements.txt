@@ -1,3 +1,14 @@
-python-telegram-bot==20.3
-httpx==0.25.2
-python-dotenv==1.0.0
+# Telegram Bot Framework
+python-telegram-bot[job-queue]==20.7
+
+# For making HTTP requests to the Plume API
+httpx[http2]==0.25.2
+
+# For handling timezone-aware operations (often useful in servers)
+pytz
+
+# For loading environment variables from .env files
+python-dotenv
+
+# For data validation and models
+pydantic>=2.0.0
