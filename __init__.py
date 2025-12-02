@@ -18,12 +18,21 @@ __version__ = "0.5.0"
 __author__ = "Hans Velez"
 
 # Export main components for easy importing
-from .plume_api_client import (
-    PlumeAPIError,
-    get_oauth_token,
-    analyze_location_health,
-    PLUME_API_BASE,
-)
+# Use try-except to handle both package and standalone imports
+try:
+    from .plume_api_client import (
+        PlumeAPIError,
+        get_oauth_token,
+        analyze_location_health,
+        PLUME_API_BASE,
+    )
+except ImportError:
+    from plume_api_client import (
+        PlumeAPIError,
+        get_oauth_token,
+        analyze_location_health,
+        PLUME_API_BASE,
+    )
 
 __all__ = [
     "__version__",

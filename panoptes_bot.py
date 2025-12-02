@@ -46,6 +46,7 @@ from plume_api_client import (
     PLUME_API_BASE,
     PLUME_REPORTS_BASE,
 )
+from src.handlers.location_stats import stats_command, stats_time_range_handler
 
 # ============ CONFIGURATION & LOGGING ============
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -372,7 +373,7 @@ def main() -> None:
         entry_points=[CommandHandler("locations", locations_start)],
         states={
             ASK_CUSTOMER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_id_provided)],
-            SELECT_LOCATION: [CallbackQueryHandler(location_selected, pattern='^((?!nav_).)*$')],
+            SELECT_LOCATION: [CallbackQueryHandler(location_selected, pattern='^((?!nav_|stats_).)*$')],
         },
         fallbacks=[CommandHandler("cancel", locations_cancel)],
     )
@@ -382,9 +383,11 @@ def main() -> None:
     application.add_handler(CommandHandler("nodes", nodes))
     application.add_handler(CommandHandler("wifi", wifi))
     application.add_handler(CommandHandler("wan", wan_command))
+    application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(setup_handler)
     application.add_handler(locations_handler)
     application.add_handler(CallbackQueryHandler(navigation_handler, pattern='^nav_'))
+    application.add_handler(CallbackQueryHandler(stats_time_range_handler, pattern='^stats_'))
 
     logger.info("Bot is starting...")
     application.run_polling()
