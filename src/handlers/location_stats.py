@@ -150,19 +150,22 @@ async def stats_time_range_callback(
     Handle callback queries for time range selection.
 
     Updates the stats display based on the selected time range.
+    Only edits the message if the content has actually changed to avoid
+    Telegram API "Message is not modified" errors.
     """
     query = update.callback_query
-    await query.answer()
 
     callback_data = query.data
     user_id = update.effective_user.id
 
     if callback_data not in TIME_RANGES:
+        await query.answer()
         logger.warning("Unknown stats callback data: %s", callback_data)
         return
 
     # Check if location is selected
     if "customer_id" not in context.user_data or "location_id" not in context.user_data:
+        await query.answer()
         await query.edit_message_text(
             "Session expired. Please run /locations to select a location."
         )
@@ -176,7 +179,7 @@ async def stats_time_range_callback(
         time_range = TIME_RANGES[callback_data]
 
         # Fetch and format stats
-        message = await fetch_and_format_stats(
+        new_message = await fetch_and_format_stats(
             user_id=user_id,
             customer_id=customer_id,
             location_id=location_id,
@@ -185,15 +188,28 @@ async def stats_time_range_callback(
             location_name=location_name,
         )
 
-        # Update message with new stats
-        keyboard = create_time_range_keyboard()
-        await query.edit_message_text(
-            message, reply_markup=keyboard, parse_mode=None
-        )
+        # Create new keyboard
+        new_keyboard = create_time_range_keyboard()
+
+        # Get current message content and reply markup
+        current_message = query.message.text
+        current_reply_markup = query.message.reply_markup
+
+        # Only edit if content has changed to avoid "Message is not modified" error
+        if new_message != current_message or new_keyboard != current_reply_markup:
+            await query.answer()
+            await query.edit_message_text(
+                new_message, reply_markup=new_keyboard, parse_mode=None
+            )
+        else:
+            # Content unchanged, just acknowledge the callback without editing
+            await query.answer()
 
     except PlumeAPIError as e:
         logger.error("API error in stats callback: %s", e)
+        await query.answer()
         await query.edit_message_text(f"An API error occurred: {e}")
     except Exception as e:
         logger.error("Unexpected error in stats callback: %s", e)
+        await query.answer()
         await query.edit_message_text("An unexpected error occurred.")
