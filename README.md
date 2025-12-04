@@ -60,7 +60,7 @@ A production-ready Telegram bot for real-time monitoring of Plume Cloud networks
 
 ---
 
-## Getting Started
+## Getting Started - 'for contanier deployment'
 
 ### Prerequisites
 - Python 3.8+ (or Docker)
