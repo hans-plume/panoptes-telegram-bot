@@ -1,5 +1,8 @@
 # Panoptes Bot - Quick Reference Guide
 
+**Version:** 1.0  
+**Last Updated:** December 2024
+
 ## Getting Started
 
 ### Architecture Overview
@@ -8,56 +11,49 @@
 User (Telegram)
     ↓
 Telegram Bot (panoptes_bot.py)
-    ├── Command Handlers (/start, /health, /status, etc.)
-    └── ConversationHandler (/auth flow)
+    ├── Command Handlers (/start, /setup, /locations, /status, /wan, /stats, /nodes, /wifi)
+    └── ConversationHandlers (/setup flow, /locations flow)
         ↓
-    OAuth 2.0 Authentication
-        ├── SSO URL (token endpoint)
+    OAuth 2.0 Authentication (2-step process)
         ├── Authorization Header (client credentials)
-        ├── Partner ID (organization)
-        └── Plume API Base URL (optional)
+        └── Partner ID (organization)
         ↓
     Plume API Client (plume_api_client.py)
         ├── get_nodes_in_location()
-        ├── get_connected_devices()
         ├── get_location_status()
         ├── get_wifi_networks()
-        ├── get_service_level()
-        ├── get_qoe_stats()
-        ├── get_internet_health()
-        └── analyze_location_health()
+        ├── get_wan_stats()
+        ├── analyze_location_health()
+        ├── analyze_wan_stats()
+        └── format_wan_analysis()
         ↓
     Plume Cloud API (REST)
 ```
 
 ## Authentication Flow
 
-### User Journey
+### User Journey (2-Step Setup)
 
-1. User sends `/auth` command
+1. User sends `/setup` command
 2. Bot enters ConversationHandler
-3. **Step 1**: Bot asks for OAuth SSO URL
-   - User provides: `https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token`
-4. **Step 2**: Bot asks for Authorization Header
-   - User provides: `Bearer abc123xyz...` or `Basic base64encoded...`
-5. **Step 3**: Bot asks for Partner ID
+3. **Step 1**: Bot asks for Authorization Header
+   - User provides: `Basic base64encoded...`
+4. **Step 2**: Bot asks for Partner ID
    - User provides: `eb0af9d0a7ab946dcb3b8ef5`
-6. **Step 4**: Bot asks for Plume API Base URL (optional)
-   - User provides: `https://api.plume.com` or `/skip` for default
-7. **Final**: Bot exchanges credentials for OAuth token
-   - Success: Shows available commands
-   - Failure: Clears config and asks to retry
+5. **Final**: Bot exchanges credentials for OAuth token
+   - Success: Suggests running `/locations`
+   - Failure: Prompts user to retry `/setup`
 
 ### OAuth 2.0 Client Credentials Flow
 
 ```
 Client (Bot) sends to SSO:
-  POST /oauth2/ausc034rgdEZKz75I357/v1/token
+  POST https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token
   Headers:
-    Authorization: Bearer <base64_encoded_credentials>
+    Authorization: <user's auth header>
     Content-Type: application/x-www-form-urlencoded
   Body:
-    grant_type=client_credentials&scope=partner:eb0af9d0a7ab946dcb3b8ef5
+    grant_type=client_credentials&scope=partnerId:eb0af9d0a7ab946dcb3b8ef5 role:partnerIdAdmin
 
 SSO responds with:
   {
@@ -67,38 +63,63 @@ SSO responds with:
   }
 
 Bot stores token and uses for API calls:
-  GET /api/v2/locations/{customerId}/{locationId}/health
+  GET /api/Customers/{customerId}/locations/{locationId}
   Headers:
     Authorization: Bearer <access_token>
 ```
 
 ## Key Functions
 
-### Authentication Helpers
+### Authentication Helpers (plume_api_client.py)
 
 | Function | Purpose | Returns |
 |----------|---------|---------|
 | `get_oauth_token()` | Exchange credentials for token | OAuth token dict |
+| `set_user_auth()` | Store user's OAuth configuration | None |
+| `get_user_auth()` | Retrieve user's OAuth config | Dict or None |
+| `is_oauth_token_valid()` | Check if token is still valid | Boolean |
 
-### Command Handlers
+### API Wrappers (plume_api_client.py)
 
-| Command | Handler | Parameters | Returns |
-|---------|---------|------------|---------|
-| `/start` | `start()` | - | Welcome message |
-| `/auth` | `auth_start()` | - | OAuth setup wizard |
-| `/health` | `handle_health_command()` | `<customerId> <locationId>` | Quick health check |
-| `/status` | `handle_status_command()` | `<customerId> <locationId>` | Location status |
-| `/nodes` | `handle_nodes_command()` | `<customerId> <locationId>` | Node status |
-| `/devices` | `handle_devices_command()` | `<customerId> <locationId>` | Device list |
-| `/wifi` | `handle_wifi_command()` | `<customerId> <locationId>` | WiFi networks |
+| Function | Purpose |
+|----------|---------|
+| `plume_request()` | Generic authenticated API call |
+| `get_customers()` | Get all customers for partner |
+| `get_locations_for_customer()` | Get locations for a customer |
+| `get_nodes_in_location()` | Get pods in a location |
+| `get_location_status()` | Get location health info |
+| `get_wifi_networks()` | Get WiFi SSIDs |
+| `get_wan_stats()` | Get WAN consumption data |
+
+### Analysis Functions (plume_api_client.py)
+
+| Function | Purpose |
+|----------|---------|
+| `analyze_location_health()` | Generate health report from location/node data |
+| `analyze_wan_stats()` | Analyze WAN stats for consumption metrics |
+| `format_wan_analysis()` | Format WAN analysis into user-friendly report |
+
+### Command Handlers (panoptes_bot.py)
+
+| Command | Handler | Description |
+|---------|---------|-------------|
+| `/start` | `start()` | Welcome message, guides to next step |
+| `/setup` | `setup_start()` | OAuth setup wizard (2 steps) |
+| `/locations` | `locations_start()` | Customer/location selection |
+| `/status` | `status()` | Main health dashboard with action buttons |
+| `/wan` | `wan_command()` | WAN consumption report |
+| `/stats` | `stats_command()` | Online stats with time range selection |
+| `/nodes` | `nodes()` | Detailed pod information |
+| `/wifi` | `wifi()` | WiFi network listing |
 
 ### Conversation States
 
 | State | Constant | What It Does |
 |-------|----------|--------------|
-| 2 | `ASK_AUTH_HEADER` | Waiting for Bearer/Basic credentials |
-| 3 | `ASK_PARTNER_ID` | Waiting for Partner ID |
-| 4 | `ASK_PLUME_API_BASE` | Waiting for Plume API base URL (or skip) |
+| 0 | `ASK_AUTH_HEADER` | Waiting for Authorization Header |
+| 1 | `ASK_PARTNER_ID` | Waiting for Partner ID |
+| 0 | `ASK_CUSTOMER_ID` | Waiting for Customer ID |
+| 1 | `SELECT_LOCATION` | Waiting for location selection |
 
 ## Code Organization
 
@@ -108,34 +129,23 @@ Bot stores token and uses for API calls:
 panoptes_bot.py
 ├── Module Docstring
 ├── Imports
-├── Configuration & Initialization
-│   ├── Environment variables
-│   ├── Logging setup
-│   └── Conversation state constants
-├── OAuth Helper Functions
-│   ├── get_oauth_token()
-│   ├── validate_auth_config()
-│   └── ensure_valid_token()
-├── Telegram Command Handlers
-│   └── start()
-├── OAuth Authentication Conversation Handler
-│   ├── auth_start()
-│   ├── receive_sso_url()
-│   ├── receive_auth_header()
-│   ├── receive_partner_id()
-│   ├── receive_api_base()
-│   ├── skip_api_base()
-│   ├── confirm_auth()
-│   └── auth_cancel()
-├── Status Query Handlers
-│   ├── handle_health_command()
-│   ├── handle_nodes_command()
-│   ├── handle_devices_command()
-│   ├── handle_status_command()
-│   └── handle_wifi_command()
+├── Configuration & Logging
+├── Conversation States
+├── Error Handler
+├── Helper Functions (get_reply_source, format_speed_test, format_pod_details)
+├── Command Handlers (start, status, nodes, wifi, wan_command)
+├── Navigation Callback Handler
+├── Location Selection Conversation
+├── Auth Setup Conversation (2-step)
 └── Main Bot Setup
-    ├── main()
-    └── __main__ entry point
+
+plume_api_client.py
+├── Configuration & Logging
+├── Exceptions (PlumeAPIError)
+├── Authentication Management
+├── Plume API Client (plume_request)
+├── API Wrappers
+└── Service Health Analysis
 ```
 
 ### Data Flow
@@ -145,58 +155,49 @@ panoptes_bot.py
    ↓
 2. Handler Function (extract arguments, validate)
    ↓
-3. Authentication Check (ensure_valid_token)
+3. Authentication Check (is_oauth_token_valid)
    ↓
 4. API Call (plume_api_client.py)
    ↓
-5. Response Formatting (Markdown text)
+5. Response Processing (analyze_location_health, etc.)
    ↓
-6. Send to User (Telegram)
+6. Response Formatting (Markdown text)
+   ↓
+7. Send to User (Telegram)
 ```
 
 ## Development Workflow
 
 ### Adding a New Command Handler
 
-1. **Create handler function**:
+1. **Create handler function in panoptes_bot.py**:
    ```python
-   async def handle_new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+   async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
        """
        /new command - What it does.
-       
-       Takes: <arg1> <arg2>
-       Returns: Status message
        """
+       reply_source = get_reply_source(update)
        user_id = update.effective_user.id
        
-       # 1. Extract and validate arguments
-       if len(context.args) < 2:
-           await update.message.reply_text("Usage: /new <arg1> <arg2>")
+       # 1. Check if location is selected
+       if 'customer_id' not in context.user_data or 'location_id' not in context.user_data:
+           await reply_source.reply_text("Please select a location with /locations first.")
            return
        
-       # 2. Check authentication
-       auth_config = user_auth.get(user_id)
-       if not auth_config or not auth_config.get("configured"):
-           await update.message.reply_text("Please authenticate first with /auth")
-           return
-       
-       # 3. Make API call
+       # 2. Make API call
        try:
-           result = await some_api_function(arg1, arg2, auth_config)
+           result = await some_api_function(user_id, ...)
        except PlumeAPIError as e:
-           await update.message.reply_markdown(f"❌ Error: {e}")
+           await reply_source.reply_text(f"An API error occurred: {e}")
            return
        
-       # 4. Format response
-       response = f"✅ Result:\n{result}"
-       
-       # 5. Send to user
-       await update.message.reply_markdown(response)
+       # 3. Format and send response
+       await reply_source.reply_markdown(f"*Result*: {result}")
    ```
 
 2. **Register handler in main()**:
    ```python
-   app.add_handler(CommandHandler("new", handle_new_command))
+   application.add_handler(CommandHandler("new", new_command))
    ```
 
 ### Debugging Tips
@@ -207,7 +208,7 @@ panoptes_bot.py
    ```
 
 2. **Validate configuration**: 
-   - Use `validate_auth_config()` to check stored credentials
+   - Use `is_oauth_token_valid()` to check stored credentials
    - Verify OAuth token hasn't expired
 
 3. **Test OAuth flow**:
@@ -251,18 +252,18 @@ panoptes_bot.py
 ## Common Issues
 
 ### "Authentication configuration incomplete"
-- User didn't complete all 4 steps of OAuth setup
-- Solution: Prompt user to run `/auth` again
+- User didn't complete the 2-step OAuth setup
+- Solution: Prompt user to run `/setup` again
 
 ### "Invalid OAuth token"
 - Token expired and refresh failed
 - Solution: Check token refresh logic, verify SSO endpoint
-- User action: Re-run `/auth` to get new token
+- User action: Re-run `/setup` to get new token
 
 ### "Plume API error: 401 Unauthorized"
 - OAuth token not being sent or invalid format
 - Solution: Check `Authorization: Bearer <token>` header format
-- Verify `ensure_valid_token()` is called before API request
+- Verify token is refreshed before API request
 
 ### "Partner ID not found"
 - Partner ID doesn't exist or has no access
@@ -275,6 +276,7 @@ panoptes_bot.py
 |----------|----------|---------|
 | `TELEGRAM_BOT_TOKEN` | Yes | Telegram bot API token |
 | `PLUME_API_BASE` | No | Plume API endpoint (default provided) |
+| `PLUME_REPORTS_BASE` | No | Plume Reports API endpoint (default provided) |
 
 ## References
 
@@ -285,6 +287,5 @@ panoptes_bot.py
 
 ---
 
-**Last Updated**: 2024
-**Version**: 1.0
-**Status**: Ready for development
+**Version**: 1.0  
+**Status**: Production Ready

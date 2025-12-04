@@ -1,8 +1,11 @@
 # Plume Bot - OAuth Authentication Setup Guide
 
+**Version:** 1.0  
+**Last Updated:** December 2024
+
 ## Overview
 
-The Plume Cloud bot now includes a complete OAuth 2.0 authentication flow using the Plume SSO (Single Sign-On) service. Users authenticate once, and the bot automatically manages their OAuth tokens with automatic refresh.
+The Plume Cloud bot includes a complete OAuth 2.0 authentication flow using the Plume SSO (Single Sign-On) service. Users authenticate once using a simple 2-step process, and the bot automatically manages their OAuth tokens with automatic refresh.
 
 ---
 
@@ -10,59 +13,34 @@ The Plume Cloud bot now includes a complete OAuth 2.0 authentication flow using 
 
 ### User Experience
 
-When a user starts interacting with the bot, they'll go through a 4-step OAuth setup:
+When a user starts interacting with the bot, they'll go through a 2-step OAuth setup:
 
 ```
-/start → /auth → Step 1: SSO URL → Step 2: Auth Header → Step 3: Partner ID → Step 4: API Base URL → ✅ Connected
+/start → /setup → Step 1: Auth Header → Step 2: Partner ID → ✅ Connected → /locations
 ```
 
 ### Step-by-Step Process
 
-#### **Step 1️⃣: SSO URL**
+#### **Step 1️⃣: Authorization Header**
 ```
-User sees:
-🔐 OAuth Authentication Setup
+User sends: /setup
 
-I'll help you set up Plume API authentication. Please provide the following information:
+Bot responds:
+Starting OAuth setup...
 
-Step 1️⃣: What is your OAuth SSO URL?
-(Example: https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token)
-```
-
-**User provides:**
-```
-https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token
-```
-
-#### **Step 2️⃣: Authorization Header**
-```
-User sees:
-✅ SSO URL saved!
-
-Step 2️⃣: What is your Authorization Header?
-(Example: Bearer abc123... or Basic base64...)
-
-This is your client credentials in base64 format.
+**Step 1 of 2:** Please provide your Plume authorization header.
+Send /cancel at any time to abort.
 ```
 
 **User provides:**
 ```
 Basic dXNlcm5hbWU6cGFzc3dvcmQ=
 ```
-or
-```
-Bearer eyJhbGciOiJIUzI1NiIs...
-```
 
-#### **Step 3️⃣: Partner ID**
+#### **Step 2️⃣: Partner ID**
 ```
-User sees:
-✅ Authorization Header saved!
-
-Step 3️⃣: What is your Partner ID?
-(Example: eb0af9d0a7ab946dcb3b8ef5)
-
-This identifies your Plume partner organization.
+Bot responds:
+**Step 2 of 2:** Great. Now, please provide your Plume Partner ID.
 ```
 
 **User provides:**
@@ -70,48 +48,22 @@ This identifies your Plume partner organization.
 eb0af9d0a7ab946dcb3b8ef5
 ```
 
-#### **Step 4️⃣: Plume API Base URL** (Optional)
-```
-User sees:
-✅ Partner ID saved!
-
-Step 4️⃣: What is your Plume API Base URL?
-(Example: https://api.plume.com or https://api.example.com)
-
-If you're not sure, type /skip
-```
-
-**User can:**
-- Provide custom URL: `https://api.example.com`
-- Skip with: `/skip` (uses default)
-- Cancel entire process: `/cancel`
-
 ### Final Verification
 
 ```
-User sees:
-📋 Confirming Your Configuration
-
-SSO URL: https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token...
-Partner ID: eb0af9d0a7ab946dcb3b8ef5
-API Base: https://api.plume.com
-
-🔄 Testing OAuth connection...
+Bot responds:
+Testing API connection...
 
 (If successful:)
+✅ **Success!** API connection is working.
 
-✅ Authentication Successful!
+Next, run /locations to begin.
+```
 
-🎉 You're all set! Your OAuth token has been obtained and will be automatically refreshed when needed.
-
-You can now use all bot commands:
-• /health <customerId> <locationId>
-• /status <customerId> <locationId>
-• /nodes <customerId> <locationId>
-• /devices <customerId> <locationId>
-• /wifi <customerId> <locationId>
-
-Type /help for more information.
+```
+(If failed:)
+❌ **Failed!** [Error message]
+Please run /setup again.
 ```
 
 ---
@@ -127,24 +79,6 @@ The bot automatically handles OAuth token lifecycle:
 3. **Automatic Refresh**: If token expires within 60 seconds, it's automatically refreshed
 4. **Token Expiration**: Stored with 60-second buffer to avoid expired token usage
 
-### Code Implementation
-
-```python
-async def get_oauth_token(auth_config: Dict) -> Optional[str]:
-    """Obtain OAuth token from Plume SSO using client credentials flow."""
-    
-    # Makes POST request to SSO URL with:
-    # - Authorization: [user's auth header]
-    # - Scope: "partnerId:{partner_id} role:partnerIdAdmin"
-    # - Grant Type: "client_credentials"
-    
-    # Returns: {
-    #   "access_token": "eyJ...",
-    #   "token_expiry": datetime(2025-11-14 15:45:23),
-    #   "expires_in": 3600
-    # }
-```
-
 ### Token Storage
 
 Credentials are stored in-memory per user:
@@ -155,16 +89,15 @@ user_auth = {
         "sso_url": "https://external.sso.plume.com/oauth2/.../v1/token",
         "auth_header": "Basic dXNlcm5hbWU6cGFzc3dvcmQ=",
         "partner_id": "eb0af9d0a7ab946dcb3b8ef5",
-        "plume_api_base": "https://api.plume.com",
+        "plume_api_base": "https://piranha-gamma.prod.us-west-2.aws.plumenet.io/api/",
+        "plume_reports_base": "https://piranha-gamma.prod.us-west-2.aws.plumenet.io/reports/",
         "access_token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
-        "token_expiry": datetime(2025-11-14 15:45:23),
-        "expires_in": 3600,
-        "configured": True
+        "token_expiry": datetime(2024-12-04 15:45:23),
     }
 }
 ```
 
-**⚠️ Production Note**: Replace in-memory storage with encrypted database!
+**⚠️ Production Note**: For production deployments, consider replacing in-memory storage with an encrypted database.
 
 ---
 
@@ -176,23 +109,21 @@ The bot sends a request equivalent to:
 
 ```bash
 curl --location 'https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token' \
-  --header 'Cache-Control: no-cache' \
   --header 'Authorization: Basic dXNlcm5hbWU6cGFzc3dvcmQ=' \
   --header 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode 'scope=partnerId:eb0af9d0a7ab946dcb3b8ef5 role:partnerIdAdmin' \
   --data-urlencode 'grant_type=client_credentials'
 ```
 
-### Python Implementation
+### Python Implementation (plume_api_client.py)
 
 ```python
-async def get_oauth_token(auth_config: Dict) -> Optional[str]:
+async def get_oauth_token(auth_config: Dict) -> Dict:
     sso_url = auth_config.get("sso_url")
     auth_header = auth_config.get("auth_header")
     partner_id = auth_config.get("partner_id")
 
     headers = {
-        "Cache-Control": "no-cache",
         "Authorization": auth_header,
         "Content-Type": "application/x-www-form-urlencoded",
     }
@@ -215,48 +146,7 @@ async def get_oauth_token(auth_config: Dict) -> Optional[str]:
     return {
         "access_token": access_token,
         "token_expiry": token_expiry,
-        "expires_in": expires_in,
     }
-```
-
----
-
-## API Integration
-
-### Using OAuth Token in API Calls
-
-All API endpoints now use the OAuth token:
-
-```python
-async def plume_request(
-    user_id: int,
-    method: str,
-    endpoint: str,
-    params: Optional[Dict] = None,
-    json: Optional[Dict] = None,
-) -> dict:
-    # Get valid OAuth token for user
-    token = get_user_token(user_id)  # Validates expiry automatically
-    
-    if not token:
-        raise PlumeAPIError(
-            "No valid OAuth token. Please authenticate with /auth"
-        )
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-    }
-
-    # Make authenticated API call to Plume
-    async with httpx.AsyncClient(timeout=PLUME_TIMEOUT) as client:
-        resp = await client.request(
-            method=method.upper(),
-            url=f"{PLUME_API_BASE}{endpoint}",
-            params=params,
-            json=json,
-            headers=headers
-        )
 ```
 
 ---
@@ -264,20 +154,23 @@ async def plume_request(
 ## Available Commands (After Authentication)
 
 ```
-/health <customerId> <locationId>
-  → Quick service health check (online status, pods, devices, QoE)
+/locations
+  → Select customer and location to monitor
 
-/status <customerId> <locationId>
-  → Overall location health and speed tests
+/status
+  → Network health dashboard with action buttons
 
-/nodes <customerId> <locationId>
-  → List all gateway nodes with status
+/wan
+  → WAN consumption analytics (24-hour report)
 
-/devices <customerId> <locationId>
-  → List all connected devices
+/stats
+  → Connection status history (3h, 24h, 7d views)
 
-/wifi <customerId> <locationId>
-  → List WiFi networks configuration
+/nodes
+  → Technical pod information
+
+/wifi
+  → WiFi network configuration
 ```
 
 ---
@@ -289,27 +182,17 @@ async def plume_request(
 If OAuth fails, user sees:
 
 ```
-❌ Authentication Failed
+❌ **Failed!** OAuth request failed with status 401
 
-Error: OAuth request failed with status 401
-
-Please verify your credentials and try again with /auth.
+Please run /setup again.
 ```
-
-### Invalid Credentials
-
-- SSO URL validation: Must start with `https://`
-- Auth Header: Cannot be empty
-- Partner ID: Must be at least 20 characters
-- API Base URL: Optional, uses default if skipped
 
 ### Token Refresh Failures
 
 If token refresh fails during API call:
 
 ```
-⚠️ Auth failed. Your token may be invalid or expired. 
-Please re-authenticate with /auth.
+An API error occurred: Could not refresh token. Please re-authenticate with /setup.
 ```
 
 ---
@@ -321,31 +204,24 @@ Please re-authenticate with /auth.
 - ✅ Automatic refresh before expiration
 - ✅ No hardcoded credentials
 - ✅ User credentials prompted at runtime
-- ⚠️ **In-memory storage (NOT production-ready)**
+- ✅ SSO URL hardcoded (secure default)
+- ⚠️ **In-memory storage** (consider database for production)
 
 ### Production Recommendations
 
 1. **Use Encrypted Database**
-   - SQLAlchemy + encryption (e.g., cryptography library)
    - Store tokens with user IDs as foreign keys
+   - Use encryption for sensitive fields
 
-2. **Add Redis Cache**
-   - Cache valid tokens to avoid repeated OAuth calls
-   - Set expiry matching token expiry
-
-3. **Audit Logging**
+2. **Audit Logging**
    - Log all authentication events
    - Log all API calls per user
 
-4. **Rate Limiting**
-   - Limit OAuth token requests per user/IP
+3. **Rate Limiting**
+   - Limit OAuth token requests per user
    - Implement exponential backoff on failures
 
-5. **Credential Rotation**
-   - Allow users to update auth credentials via `/auth update`
-   - Invalidate old tokens on credential change
-
-6. **HTTPS Only**
+4. **HTTPS Only**
    - All OAuth flows over HTTPS
    - Validate SSL certificates
 
@@ -363,9 +239,8 @@ Please re-authenticate with /auth.
 2. **Send `/start`:**
    - Bot responds with welcome message
 
-3. **Send `/auth`:**
-   - Bot asks for SSO URL
-   - Provide: `https://external.sso.plume.com/oauth2/ausc034rgdEZKz75I357/v1/token`
+3. **Send `/setup`:**
+   - Bot asks for Authorization Header
 
 4. **Send Auth Header:**
    - Provide your client credentials header
@@ -374,14 +249,14 @@ Please re-authenticate with /auth.
 5. **Send Partner ID:**
    - Provide: `eb0af9d0a7ab946dcb3b8ef5`
 
-6. **Send API Base or /skip:**
-   - Type `/skip` to use default
+6. **Bot tests OAuth:**
+   - Should show ✅ Success!
 
-7. **Bot tests OAuth:**
-   - Should show ✅ Authentication Successful!
+7. **Send `/locations`:**
+   - Select a customer and location
 
 8. **Use commands:**
-   - `/health <customerId> <locationId>`
+   - `/status`, `/wan`, `/stats`, `/nodes`, `/wifi`
    - Bot uses OAuth token automatically
 
 ---
@@ -390,21 +265,20 @@ Please re-authenticate with /auth.
 
 | Issue | Solution |
 |-------|----------|
-| "OAuth token request failed: 401" | Check auth header credentials |
+| "OAuth request failed: 401" | Check auth header credentials |
 | "No access_token in OAuth response" | Verify Partner ID is correct |
 | "Network error during OAuth" | Check SSO URL is reachable |
-| "Incomplete OAuth configuration" | Restart with `/auth` |
-| "Partner ID looks invalid" | Must be 20+ characters |
+| "Could not refresh token" | Re-run `/setup` |
 
 ---
 
 ## Summary
 
-The Plume Bot now features:
+The Plume Bot features:
 
-✅ **OAuth 2.0 Client Credentials Flow**
-- Users provide SSO URL, auth header, partner ID
-- Bot obtains and manages access tokens
+✅ **Simplified 2-Step OAuth Setup**
+- Users provide Authorization Header and Partner ID
+- SSO URL uses secure default
 
 ✅ **Automatic Token Lifecycle Management**
 - Validates token expiry before use
@@ -412,13 +286,13 @@ The Plume Bot now features:
 - Stores with 60-second safety buffer
 
 ✅ **Simple User Experience**
-- 4-step guided setup via Telegram
+- 2-step guided setup via Telegram
 - One-time configuration per user
 - Automatic refresh - no re-authentication needed
 
-✅ **Security Features**
-- Credentials encrypted at rest (recommended)
-- Automatic token expiration handling
-- Error handling for failed authentications
+✅ **Guided Workflow**
+- After setup: suggests `/locations`
+- After location selection: suggests `/status`
+- After status: provides quick action buttons
 
 Ready for production with proper database backend!
