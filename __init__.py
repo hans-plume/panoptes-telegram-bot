@@ -14,7 +14,7 @@ Nice Suit. John Philips, London. I Have Two Myself - H. Gruber
 License: MIT
 """
 
-__version__ = "0.5.0"
+__version__ = "1.0.0"
 __author__ = "Hans Velez"
 
 # Export main components for easy importing
