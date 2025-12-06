@@ -38,6 +38,65 @@ A production-ready Telegram bot for real-time monitoring of Plume Cloud networks
 
 ---
 
+## Quick Start Guide
+
+Get up and running in minutes with this step-by-step guide.
+
+### Local Development (5 minutes)
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/hans-plume/panoptes-telegram-bot.git
+cd panoptes-telegram-bot
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Create environment file
+echo 'TELEGRAM_BOT_TOKEN="your-telegram-bot-token"' > .env
+
+# 4. Run the bot
+python -m panoptes_bot
+```
+
+### Production Deployment with Docker (3 minutes)
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/hans-plume/panoptes-telegram-bot.git
+cd panoptes-telegram-bot
+
+# 2. Create environment file
+echo 'TELEGRAM_BOT_TOKEN="your-telegram-bot-token"' > .env
+
+# 3. Start the bot (builds and runs in background)
+docker compose up -d
+
+# 4. Check logs to verify it's running
+docker compose logs -f
+```
+
+### Essential Docker Commands
+
+| Command | Description |
+|---------|-------------|
+| `docker compose up -d` | Build and start the bot in the background |
+| `docker compose logs -f` | View real-time logs |
+| `docker compose down` | Stop the bot |
+| `docker compose restart` | Restart the bot |
+| `docker compose build` | Rebuild the image after code changes |
+
+### First Bot Interaction
+
+Once the bot is running, open Telegram and:
+
+1. Start a chat with your bot and send `/start`
+2. Run `/setup` and complete the 2-step OAuth process
+3. Run `/locations` to select a network to monitor
+4. Run `/status` to see your first health report
+
+---
+
 ## Command Reference
 
 ### Setup and Navigation
